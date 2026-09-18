@@ -9,13 +9,14 @@
 import { useReactFlow, useStore, NodeToolbar, Position } from '@xyflow/react';
 import {
   MoreHorizontal,
-  FolderPlus, Download, Maximize2, CheckCircle2, Trash2,
+  FolderPlus, Download, Maximize2, CheckCircle2, Trash2, Group,
   type LucideIcon,
 } from 'lucide-react';
 import { createElement, useState, type ReactNode } from 'react';
 import type { NodeStatus } from './nodes';
 import SaveToCollectionMenu, { type SaveItem } from './SaveToCollectionMenu';
 import { useCollectionsStore } from '../collectionsStore';
+import { useCanvasCtx } from './CanvasContext';
 
 export interface ToolbarItem {
   id: string;
@@ -103,7 +104,9 @@ export default function NodeFrame({
   const onDelete = () => { void deleteElements({ nodes: [{ id }] }); };
   const [saveOpen, setSaveOpen] = useState(false);
   const saved = useCollectionsStore((s) => (saveItem ? s.items.some((it) => it.url === saveItem.url) : false));
-  const left = toolbarLeft ?? buildDefaultLeft(onMore);
+  const { groupSelectedNodes } = useCanvasCtx();
+  const left = [...(toolbarLeft ?? buildDefaultLeft(onMore)),
+    { id: 'group', iconComponent: Group, label: 'Group selected nodes', onClick: () => groupSelectedNodes(id) }];
   const right = toolbarRight ?? buildDefaultRight({
     onDelete, onDownload, onExpand, hasResult,
     canSave: !!saveItem, saved, onSave: () => setSaveOpen((v) => !v),

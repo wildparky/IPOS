@@ -239,6 +239,7 @@ a:hover { text-decoration: underline; }
 }
 .brand-icon { color: var(--accent); }
 .brand-logo { width: 24px; height: 24px; border-radius: 6px; object-fit: cover; flex-shrink: 0; display: block; }
+.brand-logo-mofac { width: 100.8px; height: 36px; border-radius: 0; object-fit: contain; }
 .projects-empty-logo { width: 76px; height: 76px; border-radius: 16px; object-fit: cover; }
 .settings-about-brand { display: flex; align-items: center; gap: 10px; margin: 4px 0 14px; }
 .settings-about-brand img { width: 40px; height: 40px; border-radius: 9px; object-fit: cover; }
@@ -807,8 +808,8 @@ a:hover { text-decoration: underline; }
   border: 2px solid var(--bg-card);
   transition: all 0.16s ease;
 }
-.react-flow__node:hover .react-flow__handle,
-.react-flow__handle.connectionindicator {
+.react-flow__node:hover .react-flow__handle:not(.node-add-side),
+.react-flow__handle.connectionindicator:not(.node-add-side) {
   width: 22px !important;
   height: 22px !important;
 }
@@ -1502,8 +1503,8 @@ button:active:not(:disabled) { transform: scale(0.97); }
    visibility. */
 .node-frame-wrap { display: contents; }
 .react-flow__handle { background: transparent !important; border: none !important; width: 14px !important; height: 14px !important; opacity: 0; }
-.react-flow__handle-right { right: 0 !important; }
-.react-flow__handle-left { left: 0 !important; }
+.react-flow__handle-right { right: 0 !important; transform: translateY(-50%); }
+.react-flow__handle-left { left: 0 !important; transform: translateY(-50%); }
 
 /* node title row (above card) */
 .node-title-row {
@@ -1561,27 +1562,29 @@ button:active:not(:disabled) { transform: scale(0.97); }
 /* "+" side buttons */
 .node-add-side {
   position: absolute; top: 50%; transform: translateY(-50%); z-index: 20;
-  box-sizing: border-box; width: 22px !important; height: 22px !important; min-width: 22px; min-height: 22px;
+  box-sizing: border-box; width: 14px !important; height: 14px !important; min-width: 14px; min-height: 14px;
   aspect-ratio: 1 / 1; padding: 0; border-radius: 50%; line-height: 0;
-  border: 1.5px solid rgba(255,255,255,0.35); background: transparent; color: rgba(255,255,255,0.85);
-  display: inline-flex; align-items: center; justify-content: center; cursor: pointer; opacity: 0.65;
+  border: none !important; background: transparent; color: var(--fg);
+  display: inline-flex; align-items: center; justify-content: center; cursor: pointer; opacity: 0;
   transition: opacity 0.16s ease, transform 0.16s ease, background 0.14s ease, border-color 0.14s ease;
 }
-.node-add-left { left: -38px !important; }
-.node-add-right { right: -38px !important; }
-.node-add-side:hover { background: var(--accent-gradient); color: #0c0c0d; border-color: transparent; opacity: 1; transform: translateY(-50%) scale(1.1); }
+.node-add-left { left: -34px !important; }
+.node-add-right { right: -34px !important; }
+.node-add-side:hover { background: var(--accent-gradient) !important; color: #0c0c0d; border-color: transparent !important; opacity: 1; transform: translateY(-50%) scale(1.1); }
 .node-add-side svg {
-  position: absolute; left: 50%; top: 50%; display: block;
-  width: 12px; height: 12px; margin: 0;
-  transform: translate(-50%, -50%);
+  position: static; display: block; flex: none;
+  width: 100%; height: 100%; margin: 0; pointer-events: none;
+  transform: none;
 }
+.node-add-ring { stroke: var(--fg-dim); }
+.node-add-side:hover .node-add-ring { stroke: transparent; }
 /* The quick connector owns its visible plus icon. React Flow's generic
    handle skin also draws a pseudo-element plus, which would otherwise create
    a doubled icon inside this connector. */
 .node-add-side::before,
 .node-add-side::after { content: none !important; display: none !important; }
 .node-add-side.is-connected { opacity: 0; }
-.canvas-card-wrap:hover .node-add-side, .react-flow__node:hover .node-add-side, .react-flow__node.selected .node-add-side { opacity: 1; }
+.canvas-card-wrap:hover .node-add-side, .react-flow__node:hover .node-add-side { opacity: 1; }
 .canvas-card-wrap:hover .node-add-side.is-connected:hover { opacity: 1; }
 
 /* ── media card ── */
@@ -1640,6 +1643,9 @@ button:active:not(:disabled) { transform: scale(0.97); }
   border: 1px solid var(--panel-border);
 }
 
+.node-upload .card-upload-overlay.is-replace { opacity: 0; pointer-events: none; }
+.node-upload:hover .card-upload-overlay.is-replace { opacity: 1; pointer-events: auto; }
+
 /* generic node bodies (text/result/timeline) */
 .canvas-node { border-radius: var(--radius-lg); background: var(--bg-card); border: 1px solid var(--border); box-shadow: var(--shadow-md); }
 .canvas-node.node-text, .canvas-node.node-result { width: 260px; padding: 12px; position: relative; }
@@ -1656,7 +1662,14 @@ button:active:not(:disabled) { transform: scale(0.97); }
 
 /* group / frame */
 .canvas-group { width: 100%; height: 100%; border: 1px dashed rgba(255,255,255,0.18); border-radius: 14px; background: rgba(163,230,53,0.04); position: relative; pointer-events: all; }
-.group-label { position: absolute; top: -24px; left: 0; display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: var(--fg-dim); }
+.group-label { position: absolute; top: -24px; left: 0; display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: var(--fg-dim); white-space: nowrap; }
+.group-actions { display: flex; gap: 6px; padding: 6px; border-radius: 12px; background: var(--panel-bg); border: 1px solid var(--panel-border); }
+.group-tag-menu { position: absolute; top: 100%; width: 280px; padding: 12px; background: var(--bg-card); border: 1px solid var(--panel-border); border-radius: 12px; box-shadow: var(--shadow-md); }
+.group-tag-menu fieldset { border: 0; padding: 8px 0; display: flex; gap: 4px; flex-wrap: wrap; }
+.group-tag-menu button[aria-pressed="true"] { background: var(--accent); color: #111; }
+.group-tag-menu form { display: flex; gap: 4px; margin: 8px 0; }
+.group-tag-menu input { min-width: 0; width: 100%; }
+.group-tag-badge { background: var(--panel-bg); border: 1px solid var(--panel-border); border-radius: 8px; padding: 2px 6px; }
 .group-resize-line { border-color: var(--accent-ring) !important; }
 .group-resize-handle { background: var(--accent) !important; border-radius: 2px !important; }
 
@@ -2961,8 +2974,8 @@ button.view-bar-pct:hover { background: var(--panel-soft); color: var(--fg); bor
 .nav-item { border-radius: 10px; position: relative; }
 .nav-item.active::before { content: ''; position: absolute; left: 0; top: 50%; transform: translateY(-50%); width: 3px; height: 16px; border-radius: 999px; background: var(--accent); }
 .sidebar-brand { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.sidebar-brand-mark { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
-.sidebar-brand-mark span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sidebar-brand-mark { display: inline-flex; align-items: center; gap: 8px; min-width: 0; flex: 1; }
+.sidebar-brand-mark span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; text-align: center; font-size: 22.5px; font-weight: 200; }
 .sidebar-collapse {
   width: 28px; height: 28px; flex-shrink: 0; padding: 0; border-radius: 8px;
   display: inline-flex; align-items: center; justify-content: center;

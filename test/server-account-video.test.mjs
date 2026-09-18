@@ -5,6 +5,7 @@ import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
+import { once } from 'node:events';
 
 const listen = (server) => new Promise((resolve, reject) => {
   server.once('error', reject);
@@ -36,7 +37,7 @@ test('account video uses bearer auth, SDK field mapping, and local artifact stor
   const child = spawn(process.execPath, ['server.mjs'], {
     cwd: path.resolve(import.meta.dirname, '..'),
     env: {
-      ...process.env, HOME: home, PORT: String(canvasPort),
+      ...process.env, HOME: home, USERPROFILE: home, PORT: String(canvasPort),
       BLOCKRUN_API_KEY: secret,
       BLOCKRUN_API_BASE_URL: `http://127.0.0.1:${apiPort}`,
     },
@@ -45,8 +46,8 @@ test('account video uses bearer auth, SDK field mapping, and local artifact stor
   let logs = '';
   child.stdout.on('data', (chunk) => { logs += chunk; });
   child.stderr.on('data', (chunk) => { logs += chunk; });
-  t.after(() => {
-    child.kill('SIGTERM'); api.close();
+  t.after(async () => {
+    if (child.exitCode === null) { const exited = once(child, 'exit'); child.kill('SIGTERM'); await exited; } api.close();
     fs.rmSync(home, { recursive: true, force: true });
   });
 

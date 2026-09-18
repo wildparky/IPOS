@@ -4,11 +4,10 @@
 // the canvas (which loads it on mount).
 
 import { useEffect, useState } from 'react';
-import MediaStoragePanel from '../components/MediaStoragePanel';
 import { Plus, Trash2, Pencil, Image as ImageIcon, Film, Music, LayoutGrid, ArrowLeft } from 'lucide-react';
 import {
   listProjects, createProject, deleteProject, renameProject, setCurrentId,
-  type ProjectSummary, hydrateFromFiles, loadProject, PROJECTS_CHANGED, importLegacyProjects, exportProjectRecovery,
+  type ProjectSummary, hydrateFromFiles, loadProject, PROJECTS_CHANGED,
 } from '../projects';
 
 interface Props {
@@ -106,12 +105,7 @@ export default function ProjectsView({ onOpenCanvas }: Props) {
           <Plus size={16} aria-hidden /> New project
         </button>
       </header>
-      <div role="status">{syncError || '서버 저장소 · 목록은 5초마다 동기화됩니다.'}</div>
-      <MediaStoragePanel />
-      <div>
-        <button onClick={() => { if (confirm('기존 브라우저 데이터를 새 복구 프로젝트로 가져올까요? 기존 서버 프로젝트는 변경하지 않습니다.')) { try { importLegacyProjects(); } catch (error) { setSyncError((error as Error).message); } } }}>브라우저 데이터 복구</button>
-        <button onClick={exportProjectRecovery}>복구본 내보내기</button>
-      </div>
+      {syncError && <div role="alert">{syncError}</div>}
 
       {projects.length === 0 ? (
         <div className="projects-empty">

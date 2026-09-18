@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 
-export function auditMedia({ projectsDir, jobsDir, extraReferences = [], now = Date.now(), graceDays = 30 }) {
+export function auditMedia({ projectsDir, jobsDir, projects, extraReferences = [], now = Date.now(), graceDays = 30 }) {
   const active = new Set(), backups = new Set(), hashes = new Set();
   const warnings = [];
   function refs(value, target) {
@@ -21,7 +21,12 @@ export function auditMedia({ projectsDir, jobsDir, extraReferences = [], now = D
       catch { warnings.push('Some reference files could not be read; candidates are unverified'); }
     }
   }
-  jsonRefs(projectsDir, active);
+  // With SQLite, old top-level JSON is a backup, not current state.
+  if (projects !== undefined) {
+    if (!Array.isArray(projects)) throw new TypeError('projects must be an array');
+    refs(projects, active);
+    jsonRefs(projectsDir, backups);
+  } else jsonRefs(projectsDir, active);
   jsonRefs(path.join(projectsDir, '.backups'), backups);
   refs(extraReferences, active);
   const files = [];

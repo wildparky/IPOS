@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
+import { once } from 'node:events';
 
 async function waitForServer(url, child) {
   for (let i = 0; i < 80; i += 1) {
@@ -23,13 +24,13 @@ test('server reports account billing without creating or returning a wallet', as
   const secret = 'brk_test_server_unit';
   const child = spawn(process.execPath, ['server.mjs'], {
     cwd: path.resolve(import.meta.dirname, '..'),
-    env: { ...process.env, HOME: home, PORT: String(port), BLOCKRUN_API_KEY: secret },
+    env: { ...process.env, HOME: home, USERPROFILE: home, PORT: String(port), BLOCKRUN_API_KEY: secret },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   let output = '';
   child.stdout.on('data', (chunk) => { output += chunk; });
   child.stderr.on('data', (chunk) => { output += chunk; });
-  t.after(() => { child.kill('SIGTERM'); fs.rmSync(home, { recursive: true, force: true }); });
+  t.after(async () => { if (child.exitCode === null) { const exited = once(child, 'exit'); child.kill('SIGTERM'); await exited; } fs.rmSync(home, { recursive: true, force: true }); });
 
   const base = `http://127.0.0.1:${port}`;
   const healthResponse = await waitForServer(`${base}/api/health`, child);

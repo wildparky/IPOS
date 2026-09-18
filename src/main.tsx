@@ -12,8 +12,7 @@ function mount() {
   );
 }
 
-// Hydrate projects from the on-disk JSON files before mounting so the canvas
-// loads the file-authoritative state (survives cache clear / external edits).
+// Hydrate projects from the server's canonical storage before mounting.
 // Do not mount a stale browser-only canvas when the server cannot be reached.
 async function start() {
   const root = document.getElementById('root')!;

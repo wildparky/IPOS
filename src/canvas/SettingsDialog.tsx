@@ -5,7 +5,7 @@
 
 import { useEffect, useState, type ReactNode } from 'react';
 import {
-  X, Wallet, Boxes, Info, Copy, Check, ExternalLink, SlidersHorizontal, Bot, Trash2, type LucideIcon,
+  X, Wallet, Boxes, Info, Copy, Check, ExternalLink, SlidersHorizontal, Bot, Trash2, HardDrive, type LucideIcon,
 } from 'lucide-react';
 import { getWallet, getProviderStatus, listAgentMemory, deleteAgentMemory, type AgentMemory } from '../api/franklin';
 import { IMAGE_MODELS, VIDEO_MODELS, MUSIC_MODELS, TEXT_MODELS } from './nodes';
@@ -14,8 +14,10 @@ import { useAgentPrefs, type AgentMode } from './agentPrefsStore';
 import { useThemeStore, type Theme } from './themeStore';
 import { useLocaleStore, useT, LOCALES, type Locale, type StringKey } from '../i18n';
 import type { WalletInfo, WalletChain } from '../types';
+import MediaStoragePanel from '../components/MediaStoragePanel';
+import { importLegacyProjects, exportProjectRecovery } from '../projects';
 
-type SectionId = 'wallet' | 'models' | 'canvas' | 'agent' | 'about';
+type SectionId = 'wallet' | 'models' | 'canvas' | 'storage' | 'agent' | 'about';
 
 interface NavItem { id: SectionId; labelKey: StringKey; icon: LucideIcon; }
 
@@ -23,6 +25,7 @@ const NAV: NavItem[] = [
   { id: 'wallet', labelKey: 'settings_section_wallet', icon: Wallet },
   { id: 'models', labelKey: 'settings_section_models', icon: Boxes },
   { id: 'canvas', labelKey: 'settings_section_canvas', icon: SlidersHorizontal },
+  { id: 'storage', labelKey: 'settings_section_storage', icon: HardDrive },
   { id: 'agent',  labelKey: 'settings_section_agent',  icon: Bot },
   { id: 'about',  labelKey: 'settings_section_about',  icon: Info },
 ];
@@ -469,10 +472,34 @@ function AgentPane() {
   );
 }
 
+function StoragePane() {
+  const [error, setError] = useState('');
+  const restore = () => {
+    if (!confirm('기존 브라우저 데이터를 새 복구 프로젝트로 가져올까요? 기존 서버 프로젝트는 변경하지 않습니다.')) return;
+    setError('');
+    try { importLegacyProjects(); }
+    catch (err) { setError((err as Error).message); }
+  };
+  return (
+    <section>
+      <h2>저장소 및 복구</h2>
+      <MediaStoragePanel />
+      <h3>브라우저 데이터 복구</h3>
+      <p>기존 서버 프로젝트를 변경하지 않고 브라우저 데이터를 복구하거나 복구본을 내보냅니다.</p>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        <button type="button" onClick={restore}>브라우저 데이터 복구</button>
+        <button type="button" onClick={exportProjectRecovery}>복구본 내보내기</button>
+      </div>
+      {error && <p role="alert">{error}</p>}
+    </section>
+  );
+}
+
 const PANES: Record<SectionId, ReactNode> = {
   wallet: <WalletPane />,
   models: <ModelsPane />,
   canvas: <CanvasPane />,
+  storage: <StoragePane />,
   agent: <AgentPane />,
   about: <AboutPane />,
 };

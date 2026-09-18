@@ -36,7 +36,8 @@ import { runAgentChat, runBackendTool, describeMedia, summarizeConversation, lis
 import { billingContext, isAccountMode, ACCOUNT_PORTAL, ACCOUNT_KEYS_URL, ACCOUNT_CREDITS_URL } from './account-auth.mjs';
 import { codexGenerateImage, codexEditImage, codexStatus } from './codex-agent-bridge.mjs';
 import { topviewGenerateVideo, topviewStatus } from './topview-video-bridge.mjs';
-import { createProjectStorage, ProjectStorageError } from './project-storage.mjs';
+import { ProjectStorageError } from './project-storage.mjs';
+import { createSqliteProjectStorage } from './sqlite-project-storage.mjs';
 import { resolveProjectMediaUrl } from './project-media.mjs';
 import { auditMedia } from './media-audit.mjs';
 
@@ -62,10 +63,9 @@ function mediaJobSnapshot(job) {
     ...(job.error_code ? { error_code: job.error_code } : {}),
   };
 }
-// On-disk project files: each canvas (nodes+edges) is one JSON file on disk,
-// so projects are portable / version-controllable / editable outside the browser.
+// SQLite is authoritative; legacy project JSON is retained as migration backup.
 const PROJECTS_DIR = path.join(os.homedir(), '.franklin', 'projects');
-const projectStorage = createProjectStorage(PROJECTS_DIR);
+const projectStorage = createSqliteProjectStorage(PROJECTS_DIR, { jobsDir: JOBS_DIR });
 
 // CORS — wide open in dev so any Vite port can talk to :3100. In production,
 // set ALLOWED_ORIGINS to a comma-separated list of origins (or "*" if you
@@ -1272,15 +1272,20 @@ const server = http.createServer(async (req, res) => {
     // ── Project files (on-disk canvas persistence) ──
     if (p === '/api/media/audit' && req.method === 'POST') {
       const body = JSON.parse(await readBody(req));
-      return json(req, res, auditMedia({ projectsDir: PROJECTS_DIR, jobsDir: JOBS_DIR, extraReferences: Array.isArray(body.references) ? body.references.filter(v => typeof v === 'string') : [] }));
+      return json(req, res, auditMedia({ projectsDir: PROJECTS_DIR, jobsDir: JOBS_DIR, projects: projectStorage.list(), extraReferences: Array.isArray(body.references) ? body.references.filter(v => typeof v === 'string') : [] }));
     }
     if (/^\/api\/projects\/[^/]+$/.test(p) && req.method === 'GET') {
       try { return json(req, res, { ok: true, project: projectStorage.get(decodeURIComponent(p.slice('/api/projects/'.length))) }); }
       catch (err) { return json(req, res, { ok: false, error: err.message }, err.status || 500); }
     }
     if (p === '/api/projects' && req.method === 'GET') {
-      try { return json(req, res, { ok: true, storageVersion: 2, projects: new URL(req.url, 'http://localhost').searchParams.get('summary') === '1' ? projectStorage.summaries() : projectStorage.list() }); }
+      try { return json(req, res, { ok: true, storageVersion: 2, storageEngine: 'sqlite', capabilities: ['entity-patch'], projects: new URL(req.url, 'http://localhost').searchParams.get('summary') === '1' ? projectStorage.summaries() : projectStorage.list() }); }
       catch (err) { return json(req, res, { ok: false, error: String(err), projects: [] }, 500); }
+    }
+    if (p === '/api/projects/patch' && req.method === 'POST') {
+      let body; try { body = JSON.parse(await readBody(req)); } catch { return json(req, res, { ok: false, error: 'bad json' }, 400); }
+      try { return json(req, res, { ok: true, project: projectStorage.patch(body.id, body.patch) }); }
+      catch (err) { const e = err instanceof ProjectStorageError ? err : new ProjectStorageError('STORAGE', String(err), 500); return json(req, res, { ok: false, error: e.message, code: e.code }, e.status); }
     }
     if (p === '/api/projects/save' && req.method === 'POST') {
       const raw = await readBody(req);

@@ -4,7 +4,7 @@
 //   • subtle   — a thin neutral line (minimal, no gradient)
 // Colors track the active theme: lime for dark, gold for gold, petrol for light.
 
-import { BaseEdge, getBezierPath, type EdgeProps } from '@xyflow/react';
+import { BaseEdge, getBezierPath, Position, useInternalNode, type EdgeProps } from '@xyflow/react';
 import { usePrefsStore } from './prefsStore';
 import { useThemeStore } from './themeStore';
 
@@ -17,7 +17,21 @@ const PALETTES: Record<'dark' | 'gold' | 'light', Palette> = {
 };
 
 export function FlowEdge(props: EdgeProps) {
-  const { id, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, style } = props;
+  const { id, sourcePosition, targetPosition, style } = props;
+  const sourceNode = useInternalNode(props.source);
+  const targetNode = useInternalNode(props.target);
+  // Visible quick-connect buttons sit outside the card; completed edges attach
+  // to the card itself, independently of which handle created the connection.
+  const cardAnchor = (node: typeof sourceNode, position: Position, x: number, y: number) => {
+    if (!node || node.measured.width == null || node.measured.height == null
+      || (position !== Position.Left && position !== Position.Right)) return { x, y };
+    return {
+      x: node.internals.positionAbsolute.x + (position === Position.Right ? node.measured.width : 0),
+      y: node.internals.positionAbsolute.y + node.measured.height / 2,
+    };
+  };
+  const { x: sourceX, y: sourceY } = cardAnchor(sourceNode, sourcePosition, props.sourceX, props.sourceY);
+  const { x: targetX, y: targetY } = cardAnchor(targetNode, targetPosition, props.targetX, props.targetY);
   const edgeStyle = usePrefsStore((s) => s.edgeStyle);
   const theme = useThemeStore((s) => s.theme);
   const p = PALETTES[theme];

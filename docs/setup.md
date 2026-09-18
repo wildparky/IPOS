@@ -1,6 +1,10 @@
 # 설치와 실행
 
 이 저장소의 현재 구현 기준입니다. Codex 호스트의 기능 지원 여부는 설치된 CLI에 따라 다릅니다.
+SQLite 저장소는 Node.js 24 이상을 기준으로 검증합니다(`node:sqlite` 사용).
+현재 검증 런타임(Node 24.14.0)은 SQLite ExperimentalWarning을 출력합니다. 이를 숨기지 않습니다.
+업데이트 전 서버를 정지하고 `~/.franklin/projects` 전체를 백업하세요.
+첫 시작 시 기존 JSON이 DB로 이전되며 원본은 보존됩니다.
 
 ## 로컬 실행
 

@@ -6,6 +6,7 @@ import { createContext, useContext } from 'react';
 export type ImageEditOp = 'outpaint' | 'enhance' | 'cutout' | 'pixels';
 
 export interface CanvasCtx {
+  groupSelectedNodes: (fromNodeId: string) => void;
   /**
    * Open the connect-menu anchored near a screen-space point, with the given
    * source node id pre-filled. Called by per-node "+" buttons on the edge of
@@ -48,6 +49,7 @@ export interface CanvasCtx {
 }
 
 export const CanvasContext = createContext<CanvasCtx>({
+  groupSelectedNodes: () => {},
   openConnectMenu: () => {},
   runImageEdit: () => {},
   runImageSplit: () => {},

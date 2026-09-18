@@ -47,7 +47,7 @@ type Strings = Record<string, string>;
 
 const en: Strings = {
   // Sidebar
-  sidebar_brand: 'Franklin Canvas',
+  sidebar_brand: 'IP OS',
   sidebar_canvas: 'Canvas',
   sidebar_comparison: 'Comparison',
   sidebar_projects: 'Projects',
@@ -61,6 +61,7 @@ const en: Strings = {
   settings_section_wallet: 'Billing',
   settings_section_models: 'Models & pricing',
   settings_section_canvas: 'Canvas',
+  settings_section_storage: 'Storage',
   settings_section_agent: 'Agent',
   settings_section_about: 'About',
   settings_close: 'Close settings',
@@ -123,7 +124,7 @@ const en: Strings = {
 };
 
 const zhCN: Strings = {
-  sidebar_brand: 'Franklin Canvas',
+  sidebar_brand: 'IP OS',
   sidebar_canvas: '画布',
   sidebar_comparison: '模型对比',
   sidebar_projects: '项目',
@@ -136,6 +137,7 @@ const zhCN: Strings = {
   settings_section_wallet: '计费',
   settings_section_models: '模型与价格',
   settings_section_canvas: '画布',
+  settings_section_storage: '存储',
   settings_section_agent: 'Agent',
   settings_section_about: '关于',
   settings_close: '关闭设置',
@@ -192,7 +194,7 @@ const zhCN: Strings = {
 };
 
 const ja: Strings = {
-  sidebar_brand: 'Franklin Canvas',
+  sidebar_brand: 'IP OS',
   sidebar_canvas: 'キャンバス',
   sidebar_comparison: 'モデル比較',
   sidebar_projects: 'プロジェクト',
@@ -205,6 +207,7 @@ const ja: Strings = {
   settings_section_wallet: '請求',
   settings_section_models: 'モデルと料金',
   settings_section_canvas: 'キャンバス',
+  settings_section_storage: 'ストレージ',
   settings_section_agent: 'エージェント',
   settings_section_about: 'バージョン情報',
   settings_close: '設定を閉じる',

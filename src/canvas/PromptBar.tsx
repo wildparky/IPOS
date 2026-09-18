@@ -10,14 +10,13 @@
 import { useEffect, useRef, useState } from 'react';
 import { useReactFlow, useStore } from '@xyflow/react';
 import {
-  ArrowUp, ImageIcon, Film, Music, X, Plus, Upload, AlertCircle, Settings2,
+  ArrowUp, ImageIcon, Film, Music, X, Plus, Upload, Settings2,
   type LucideIcon,
 } from 'lucide-react';
 import { IMAGE_MODELS, VIDEO_MODELS, MUSIC_MODELS, TOPVIEW_VIDEO_MODELS, TOPVIEW_VIDEO_SELECTOR } from './nodes';
 import ModelDropdown from '../components/ModelDropdown';
 import VideoSettingsPanel, { type VideoSettings, type AspectRatio, type VideoInputMode } from './VideoSettingsPanel';
 import ImageSettingsPanel, { type ImageSettings, type ImageRatio, type ImageQuality, type ImageSize } from './ImageSettingsPanel';
-import { getWallet } from '../api/franklin';
 import { useT } from '../i18n';
 
 type Mode = 'imagegen' | 'videogen' | 'musicgen';
@@ -211,12 +210,6 @@ export default function PromptBar({ onSend }: Props) {
   // aspect / duration without clicking away from the prompt area.
   const [settingsOpen, setSettingsOpen] = useState(false);
   const settingsWrapRef = useRef<HTMLDivElement>(null);
-  // Billing snapshot (null while loading). Account mode has no browser-visible
-  // credential or wallet address; wallet mode shows a funding hint if needed.
-  const [walletState, setWalletState] = useState<{
-    address: string; balanceUsdc: number | null; isNew: boolean; network: string; authMode?: 'api-key' | 'wallet';
-  } | null>(null);
-
   const fileRef = useRef<HTMLInputElement>(null);
   const { updateNodeData } = useReactFlow();
 
@@ -228,27 +221,6 @@ export default function PromptBar({ onSend }: Props) {
     document.addEventListener('mousedown', closeOnOutsideClick);
     return () => document.removeEventListener('mousedown', closeOnOutsideClick);
   }, [settingsOpen]);
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const w = await getWallet('solana').catch(() => null);
-        if (cancelled) return;
-        if (w) {
-          setWalletState({ address: w.address, balanceUsdc: w.balanceUsdc, isNew: !!w.isNew, network: w.network, authMode: w.authMode });
-        }
-      } catch { /* leave null */ }
-    })();
-    return () => { cancelled = true; };
-  }, []);
-  const needsFunding = walletState?.authMode !== 'api-key' && typeof walletState?.balanceUsdc === 'number' && walletState.balanceUsdc < 0.01;
-  const shortAddr = walletState?.address
-    ? `${walletState.address.slice(0, 6)}…${walletState.address.slice(-4)}`
-    : '';
-  const copyAddr = () => {
-    if (walletState?.address) void navigator.clipboard.writeText(walletState.address);
-  };
 
   // Hydrate from the bound node whenever the SELECTION changes — keyed on the
   // node id only. Depending on the whole `selectedNode` object would re-run this
@@ -411,18 +383,6 @@ export default function PromptBar({ onSend }: Props) {
 
   return (
     <div className="prompt-bar nodrag nopan" onClick={(e) => e.stopPropagation()}>
-      {needsFunding && walletState && (
-        <div className="prompt-bar-banner" role="status">
-          <AlertCircle size={13} aria-hidden />
-          <span>
-            {t(walletState.isNew ? 'pb_wallet_new' : 'pb_wallet_ready', { network: walletState.network })}{' '}
-            <button type="button" className="prompt-bar-banner-addr" onClick={copyAddr} title="Copy full address">
-              <code>{shortAddr}</code>
-            </button>{' '}
-            {t('pb_wallet_tail')}
-          </span>
-        </div>
-      )}
       <div className="prompt-bar-top">
         {isOmniReference ? (
           <div className="pb-ref-omni-strip" aria-label="Omni Reference images">
@@ -624,7 +584,7 @@ export default function PromptBar({ onSend }: Props) {
         <div className="pb-flex" />
         <div
           className="pb-cost"
-          title={walletState?.authMode === 'api-key' ? 'Estimated cost charged to your BlockRun account' : 'Estimated USDC cost, settled via x402 on Solana or Base'}
+          title="Estimated generation cost"
         >
           <span className="pb-cost-symbol">USDC</span>
           <span className="pb-cost-n">

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, useRef } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useState, useRef } from 'react';
 import {
   ReactFlow,
   ReactFlowProvider,
@@ -9,6 +9,7 @@ import {
   useEdgesState,
   useReactFlow,
   BackgroundVariant,
+  SelectionMode,
   type Connection,
   type Node,
   type Edge,
@@ -33,7 +34,9 @@ import { usePrefsStore } from '../canvas/prefsStore';
 import { CanvasContext, type ImageEditOp } from '../canvas/CanvasContext';
 import { generate, bridgeMedia, stitchComparison, concatVideos, describeMedia, type StitchItem } from '../api/franklin';
 import type { CanvasAgentApi } from '../canvas/agentTools';
-import { getOrCreateCurrent, saveProjectCanvas, renameProject, canonicalMedia, PROJECT_MEDIA_CHANGED } from '../projects';
+import { getOrCreateCurrent, getProject, saveProjectCanvas, renameProject, canonicalMedia, PROJECT_GRAPH_CHANGED, PROJECT_SYNC_CHANGED, pollProject, projectSyncMessage, blockProject } from '../projects';
+import { cleanGraph, graphPatch, mergeProject } from '../projectMerge';
+import { randomUUID } from '../uuid';
 import { useUiStore } from '../uiStore';
 import { useThemeStore } from '../canvas/themeStore';
 
@@ -109,16 +112,12 @@ function CanvasInner() {
   const projectIdRef = useRef(project.id);
   const [nodes, setNodes, onNodesChange] = useNodesState(project.nodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(project.edges);
-  useEffect(() => {
-    const syncMedia = () => setNodes(current => canonicalMedia(current));
-    window.addEventListener(PROJECT_MEDIA_CHANGED, syncMedia);
-    return () => window.removeEventListener(PROJECT_MEDIA_CHANGED, syncMedia);
-  }, [setNodes]);
-
-  // Persist canvas back into the current project (debounced).
-  useEffect(() => {
-    const t = setTimeout(() => saveProjectCanvas(projectIdRef.current, nodes, edges), 400);
-    return () => clearTimeout(t);
+  const syncedCanvas = useRef(cleanGraph(project));
+  // Capture local drafts immediately. Network writes are debounced by the store,
+  // so remote responses cannot race a 400ms canvas-only draft.
+  useLayoutEffect(() => {
+    saveProjectCanvas(projectIdRef.current, nodes, edges);
+    syncedCanvas.current = cleanGraph(canonicalMedia({ ...syncedCanvas.current, nodes, edges }));
   }, [nodes, edges]);
 
   // ── Undo / Redo ──
@@ -189,35 +188,46 @@ function CanvasInner() {
   const bgDotColor = theme === 'dark' ? '#222' : theme === 'gold' ? '#d8d2c6' : '#e0e0dd';
   const minimapMask = theme === 'dark' ? 'rgba(7,7,10,0.85)' : 'rgba(255,255,255,0.7)';
   const connectStartFrom = useRef<string | null>(null);
-  // Start the id counter ABOVE the highest id already on the loaded canvas —
-  // otherwise after a reload it resets to 100 and new nodes collide with
-  // persisted nodes (n100, n101…), overwriting them (and creating self-edges).
-  const idCounter = useRef(
-    project.nodes.reduce((max, n) => {
-      const num = parseInt(String(n.id).replace(/^\D+/, ''), 10);
-      return Number.isFinite(num) && num > max ? num : max;
-    }, 99) + 1,
-  );
   const agentColIdx = useRef(0); // vertical position of the next standalone agent node
   const { screenToFlowPosition, getNode, getNodes, getEdges, fitView, updateNodeData } = useReactFlow();
-  // Collision-proof id: skip any id already present on the canvas.
-  const nextId = useCallback((): string => {
-    let id: string;
-    do { id = `n${idCounter.current++}`; } while (getNode(id));
-    return id;
-  }, [getNode]);
-  // Type-prefixed, collision-proof ids for AGENT-created nodes (img1/vid2/mus1/
-  // film1/tl1). Encoding the kind in the id helps the LLM never mistake an image
-  // node for a video one (the id encodes the kind). Counters are per-prefix.
-  const typedCounters = useRef<Record<string, number>>({});
-  const nextTypedId = useCallback((prefix: string): string => {
-    let id: string;
-    do {
-      typedCounters.current[prefix] = (typedCounters.current[prefix] ?? 0) + 1;
-      id = `${prefix}${typedCounters.current[prefix]}`;
-    } while (getNode(id));
-    return id;
-  }, [getNode]);
+  // IDs must be unique across browsers, not just within the current canvas.
+  const nextId = useCallback(() => 'n_' + randomUUID(), []);
+  const nextTypedId = useCallback((prefix: string) => prefix + '_' + randomUUID(), []);
+  const [syncMessage, setSyncMessage] = useState('');
+  useEffect(() => {
+    const id = projectIdRef.current;
+    const syncStatus = () => setSyncMessage(projectSyncMessage(id));
+    const syncGraph = (event: Event) => {
+      if ((event as CustomEvent<string>).detail !== id) return;
+      const remote = getProject(id); if (!remote) return;
+      const currentNodes = getNodes(), currentEdges = getEdges();
+      const base = canonicalMedia(syncedCanvas.current);
+      try {
+        const merged = mergeProject(base, canonicalMedia({ ...base, nodes: currentNodes, edges: currentEdges, name: remote.name }), remote);
+        const changed = graphPatch(base, merged);
+        syncedCanvas.current = merged;
+        setProjectName(remote.name);
+        if (!changed.nodes.length && !changed.edges.length) return;
+        // Snapshot undo cannot safely cross a remote update; do not undo a peer's work.
+        historyRef.current = { past: [], future: [] }; isUndoRedoRef.current = true;
+        const localNodes = new Map(currentNodes.map(n => [n.id, n]));
+        const localEdges = new Map(currentEdges.map(e => [e.id, e]));
+        setNodes(merged.nodes.map(n => ({ ...n, selected: localNodes.get(n.id)?.selected ?? false })));
+        setEdges(merged.edges.map(e => ({ ...e, selected: localEdges.get(e.id)?.selected ?? false })));
+        saveProjectCanvas(id, merged.nodes, merged.edges);
+      } catch (error) { blockProject(id, error, { nodes: currentNodes, edges: currentEdges }); }
+    };
+    let polling = false;
+    const poll = async () => { if (polling) return; polling = true; try { await pollProject(id); } finally { polling = false; } };
+    window.addEventListener(PROJECT_GRAPH_CHANGED, syncGraph);
+    window.addEventListener(PROJECT_SYNC_CHANGED, syncStatus);
+    window.addEventListener('focus', poll);
+    const timer = setInterval(poll, 3000);
+    return () => {
+      clearInterval(timer); window.removeEventListener(PROJECT_GRAPH_CHANGED, syncGraph);
+      window.removeEventListener(PROJECT_SYNC_CHANGED, syncStatus); window.removeEventListener('focus', poll);
+    };
+  }, [getNodes, getEdges, setNodes, setEdges]);
 
   const onConnect = useCallback(
     (params: Connection) => {
@@ -277,6 +287,24 @@ function CanvasInner() {
     [nodes, setEdges, setNodes],
   );
 
+  const groupSelectedNodes = useCallback((fromNodeId: string) => {
+    const all = getNodes();
+    const selected = all.filter(n => n.selected && n.type !== 'group');
+    const members = selected.length ? selected : all.filter(n => n.id === fromNodeId && n.type !== 'group');
+    if (!members.length) return;
+    const left = Math.min(...members.map(n => n.position.x));
+    const top = Math.min(...members.map(n => n.position.y));
+    const right = Math.max(...members.map(n => n.position.x + (n.measured?.width ?? n.width ?? 280)));
+    const bottom = Math.max(...members.map(n => n.position.y + (n.measured?.height ?? n.height ?? 280)));
+    const entry = NODE_CATALOG.find(n => n.type === 'group');
+    const group: Node = {
+      id: nextId(), type: 'group', position: { x: left - 24, y: top - 32 },
+      width: right - left + 48, height: bottom - top + 56, zIndex: -1, selected: true,
+      data: { ...entry?.defaultData, memberIds: members.map(n => n.id) },
+    };
+    setNodes(nds => [group, ...nds.map(n => ({ ...n, selected: false }))]);
+  }, [getNodes, nextId, setNodes]);
+
   // ── Group sync drag ──
   // When a Group/Frame node is dragged, the nodes whose center sits inside its
   // bounds at drag-start should follow the drag delta — Figma-frame style.
@@ -297,6 +325,8 @@ function CanvasInner() {
     const children = nodes
       .filter((n) => n.id !== node.id && n.type !== 'group')
       .filter((n) => {
+        const memberIds = node.data.memberIds;
+        if (Array.isArray(memberIds)) return memberIds.includes(n.id);
         const w = n.measured?.width ?? (n.width as number) ?? 0;
         const h = n.measured?.height ?? (n.height as number) ?? 0;
         const cx = n.position.x + w / 2;
@@ -1037,7 +1067,7 @@ function CanvasInner() {
         if (d?.resultUrl) {
           const dur = d.durationS ?? 5;
           items.push({ url: d.resultUrl });
-          clips.push({ id: `c-${nid}-${idCounter.current++}`, url: d.resultUrl, kind: 'video', label: d.title || d.model || nid, durationS: dur, srcDurationS: dur, inS: 0 });
+          clips.push({ id: `c-${nid}-${randomUUID()}`, url: d.resultUrl, kind: 'video', label: d.title || d.model || nid, durationS: dur, srcDurationS: dur, inS: 0 });
         }
       }
       if (items.length < 2) return { ok: false, error: 'need at least 2 finished clips to assemble a film' };
@@ -1195,6 +1225,7 @@ function CanvasInner() {
   return (
     <div className="canvas-host">
       <div className="canvas-toolbar">
+        {syncMessage && <span role="status" title={syncMessage} style={{ fontSize: 11, maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: syncMessage.startsWith('저장 중단') ? '#f99' : 'var(--text-muted)' }}>{syncMessage}</span>}
         <input
           className="canvas-brand-input"
           value={projectName}
@@ -1266,7 +1297,7 @@ function CanvasInner() {
         </button>
       </div>
 
-      <CanvasContext.Provider value={{ openConnectMenu, runImageEdit, runImageSplit, runAnnotate, exportTimeline }}>
+      <CanvasContext.Provider value={{ openConnectMenu, runImageEdit, runImageSplit, runAnnotate, exportTimeline, groupSelectedNodes }}>
       <div className="canvas-body">
         <div className={`canvas-flow ${showMinimap ? 'has-minimap' : ''}`} onClick={dismissPending}>
         <ReactFlow
@@ -1304,6 +1335,7 @@ function CanvasInner() {
           // creates a multi-selection marquee.
           panOnDrag={[2]}
           selectionOnDrag
+          selectionMode={SelectionMode.Partial}
           selectNodesOnDrag={false}
           deleteKeyCode={['Delete', 'Backspace']}
           minZoom={0.2}

@@ -7,3 +7,6 @@ dist/
 .env.local
 .env.*.local
 *.tsbuildinfo
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm

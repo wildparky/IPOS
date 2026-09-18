@@ -1,7 +1,7 @@
 // Node types mirror what the BlockRun gateway actually serves through Franklin.
 // Image / video catalogs are the known-valid models on the BlockRun gateway.
 
-import { Handle, NodeResizer, Position, useReactFlow, useStore, useUpdateNodeInternals, type NodeProps } from '@xyflow/react';
+import { Handle, NodeResizer, NodeToolbar, Position, useReactFlow, useStore, useUpdateNodeInternals, type NodeProps } from '@xyflow/react';
 import { useEffect, useState, useRef, type CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
 import { Upload, ImageIcon, Film, Type, SquareDashed, Clapperboard, ImagePlus, Upload as ReplaceIcon, Loader2, Music, X, Plus } from 'lucide-react';
@@ -220,7 +220,10 @@ function AddSideButton({ id, side = 'right' }: { id: string; side?: 'left' | 'ri
         openConnectMenu(id, anchorX, r.top + r.height / 2, side);
       }}
     >
-      <Plus size={18} strokeWidth={2.75} aria-hidden />
+      <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <circle className="node-add-ring" cx="12" cy="12" r="11.1" strokeWidth="1.8" />
+        <path d="M12 7.2V16.8M7.2 12H16.8" stroke="currentColor" strokeWidth="1.65" strokeLinecap="round" />
+      </svg>
     </Handle>
   );
 }
@@ -312,7 +315,7 @@ export function UploadNode({ data, id }: NodeProps) {
             ) : (
               <div className="card-placeholder">drop or upload</div>
             )}
-            <label className="card-upload-overlay">
+            <label className={`card-upload-overlay${d.imageUrl ? ' is-replace' : ''}`}>
               <input
                 type="file"
                 accept="image/*"
@@ -346,6 +349,16 @@ export function UploadNode({ data, id }: NodeProps) {
 export function ImageGenNode({ data, id }: NodeProps) {
   useRefreshHandles(id);
   const d = data as GenNodeData & { title?: string };
+  const [imageSize, setImageSize] = useState<{ url: string; width: number; height: number } | null>(null);
+  const updateNodeInternals = useUpdateNodeInternals();
+  const loadedSize = imageSize?.url === d.resultUrl ? imageSize : null;
+  const imageScale = loadedSize ? Math.min(1, 300 / Math.max(loadedSize.width, loadedSize.height)) : 1;
+  const cardWidth = loadedSize ? loadedSize.width * imageScale : 280;
+  const cardHeight = loadedSize ? loadedSize.height * imageScale : 280;
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => updateNodeInternals(id));
+    return () => cancelAnimationFrame(frame);
+  }, [id, cardWidth, cardHeight, updateNodeInternals]);
   const [menuOpen, setMenuOpen] = useState(false);
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -402,7 +415,7 @@ export function ImageGenNode({ data, id }: NodeProps) {
           ) : null
         }
       >
-        <div className="media-card">
+        <div className="media-card" style={{ width: cardWidth, height: cardHeight }}>
           <CornerDelete id={id} />
           <input ref={fileRef} type="file" accept="image/*" onChange={onFile} hidden />
           {d.resultUrl ? (
@@ -412,6 +425,12 @@ export function ImageGenNode({ data, id }: NodeProps) {
                 alt=""
                 className="media-fill media-img"
                 data-testid="canvas-node-image-content"
+                onLoad={(e) => {
+                  const image = e.currentTarget;
+                  if (image.naturalWidth > 0 && image.naturalHeight > 0) {
+                    setImageSize({ url: d.resultUrl!, width: image.naturalWidth, height: image.naturalHeight });
+                  }
+                }}
                 onError={() => updateNodeData(id, {
                   status: 'error',
                   resultUrl: undefined,
@@ -568,6 +587,9 @@ export function VideoGenNode({ data, id }: NodeProps) {
     audio: d.audio ?? true,
     inputMode: d.inputMode ?? 'text',
   });
+  useEffect(() => setSettings({ mode: d.mode ?? 'standard', ratio: d.ratio ?? '16:9',
+    durationS: d.durationS ?? 5, resolution: d.resolution ?? '720p', audio: d.audio ?? true,
+    inputMode: d.inputMode ?? 'text' }), [d.mode, d.ratio, d.durationS, d.resolution, d.audio, d.inputMode]);
 
   const selectedModelId = d.topviewModel ?? (d.model?.startsWith('topview/seedance-') ? d.model : TOPVIEW_SEEDANCE_MODELS[0].id);
   const modelSpec = TOPVIEW_SEEDANCE_MODELS.find((m) => m.id === selectedModelId) ?? TOPVIEW_SEEDANCE_MODELS[0];
@@ -667,8 +689,7 @@ export function MusicGenNode({ data, id }: NodeProps) {
     const next = peers[(idx + dir + peers.length) % peers.length];
     setLightboxSrc((next.data as GenNodeData).resultUrl as string);
   };
-  const [lyricsMode, setLyricsMode] = useState<LyricsMode>(d.lyricsMode ?? 'adaptive');
-  const [lyrics, setLyrics] = useState(d.lyrics ?? '');
+  const { updateNodeData } = useReactFlow();
 
   const model = MUSIC_MODELS.find((m) => m.id === (d.model ?? MUSIC_MODELS[0].id)) ?? MUSIC_MODELS[0];
   d.priceUsd = model.price;
@@ -689,13 +710,10 @@ export function MusicGenNode({ data, id }: NodeProps) {
         onMore={() => setLyricsOpen((v) => !v)}
         toolbarExtra={lyricsOpen && (
           <LyricsPanel
-            mode={lyricsMode}
-            lyrics={lyrics}
+            mode={d.lyricsMode ?? 'adaptive'}
+            lyrics={d.lyrics ?? ''}
             onChange={(next) => {
-              setLyricsMode(next.mode);
-              setLyrics(next.lyrics);
-              d.lyricsMode = next.mode;
-              d.lyrics = next.lyrics;
+              updateNodeData(id, { lyricsMode: next.mode, lyrics: next.lyrics });
             }}
           />
         )}
@@ -746,8 +764,7 @@ export function MusicGenNode({ data, id }: NodeProps) {
 export function TextNode({ data, id }: NodeProps) {
   useRefreshHandles(id);
   const d = data as TextNodeData;
-  const [prompt, setPrompt] = useState(d.prompt ?? '');
-  const [, force] = useState(0);
+  const { updateNodeData } = useReactFlow();
 
   return (
     <div className="canvas-card-wrap">
@@ -761,12 +778,12 @@ export function TextNode({ data, id }: NodeProps) {
           placement="down"
           models={TEXT_MODELS.map((m) => ({ id: m.id, label: `${m.label} · $${m.priceK.toFixed(4)}/1k` }))}
           value={d.model ?? TEXT_MODELS[0].id}
-          onChange={(id) => { d.model = id; force((n) => n + 1); }}
+          onChange={(model) => updateNodeData(id, { model })}
         />
         <textarea
           className="node-prompt"
-          value={prompt}
-          onChange={(e) => { setPrompt(e.target.value); d.prompt = e.target.value; }}
+          value={d.prompt ?? ''}
+          onChange={(e) => updateNodeData(id, { prompt: e.target.value })}
           placeholder="Prompt…"
           rows={3}
           aria-label="Text prompt"
@@ -784,9 +801,85 @@ export function TextNode({ data, id }: NodeProps) {
 
 // ── Group / frame ──
 export function GroupNode({ data, id, selected }: NodeProps) {
-  const d = data as { label?: string };
+  const d = data as { label?: string; tags?: string[]; memberIds?: string[] };
+  const { updateNodeData, setNodes, deleteElements } = useReactFlow();
+  const [editing, setEditing] = useState(false);
+  const [name, setName] = useState('');
+  const [tagOpen, setTagOpen] = useState(false);
+  const [customTag, setCustomTag] = useState('');
+  const tagRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!selected) setTagOpen(false);
+  }, [selected]);
+  useEffect(() => {
+    if (!tagOpen) return;
+    const close = (e: PointerEvent) => {
+      if (!tagRef.current?.contains(e.target as HTMLElement)) setTagOpen(false);
+    };
+    document.addEventListener('pointerdown', close);
+    return () => document.removeEventListener('pointerdown', close);
+  }, [tagOpen]);
+  const tags = d.tags ?? [];
+  const toggleTag = (tag: string) => updateNodeData(id, {
+    tags: tags.includes(tag) ? tags.filter(t => t !== tag) : [...tags, tag],
+  });
+  const commitName = () => {
+    updateNodeData(id, { label: name.trim() || 'Group' });
+    setEditing(false);
+  };
+  const autoSort = () => setNodes(nodes => {
+    const group = nodes.find(n => n.id === id);
+    if (!group) return nodes;
+    const width = group.measured?.width ?? group.width ?? 360;
+    const height = group.measured?.height ?? group.height ?? 240;
+    const members = nodes.filter(n => {
+      if (n.id === id || n.type === 'group') return false;
+      if (Array.isArray(d.memberIds)) return d.memberIds.includes(n.id);
+      const x = n.position.x + (n.measured?.width ?? n.width ?? 280) / 2;
+      const y = n.position.y + (n.measured?.height ?? n.height ?? 280) / 2;
+      return x >= group.position.x && x <= group.position.x + width && y >= group.position.y && y <= group.position.y + height;
+    }).sort((a, b) => a.position.y - b.position.y || a.position.x - b.position.x);
+    if (!members.length) return nodes;
+    const columns = Math.ceil(Math.sqrt(members.length));
+    const cellWidth = Math.max(...members.map(n => n.measured?.width ?? n.width ?? 280));
+    const positions = new Map<string, { x: number; y: number }>();
+    let y = group.position.y + 40;
+    for (let i = 0; i < members.length; i += columns) {
+      const row = members.slice(i, i + columns);
+      row.forEach((n, col) => positions.set(n.id, { x: group.position.x + 24 + col * (cellWidth + 32), y }));
+      y += Math.max(...row.map(n => n.measured?.height ?? n.height ?? 280)) + 40;
+    }
+    return nodes.map(n => n.id === id ? {
+      ...n, width: columns * cellWidth + (columns - 1) * 32 + 48,
+      height: y - group.position.y - 16,
+      data: { ...n.data, memberIds: members.map(m => m.id) },
+    } : positions.has(n.id) ? { ...n, position: positions.get(n.id)! } : n);
+  });
   return (
     <div className="canvas-group">
+      <NodeToolbar isVisible={selected} position={Position.Top} offset={36}>
+        <div className="group-actions nodrag nopan" onClick={e => e.stopPropagation()}>
+          <div ref={tagRef}>
+            <button type="button" aria-expanded={tagOpen} onClick={() => setTagOpen(v => !v)}>Tag</button>
+            {tagOpen && <div className="group-tag-menu" role="dialog" aria-label="Group tags">
+              {[
+                ['Production status', 'In progress', 'Needs review', 'Approved'],
+                ['Purpose', 'Reference', 'Inspiration', 'On hold'],
+              ].map(([heading, ...options]) => <fieldset key={heading}>
+                <legend>{heading}</legend>
+                {options.map(tag => <button type="button" key={tag} aria-pressed={tags.includes(tag)} onClick={() => toggleTag(tag)}>{tag}</button>)}
+              </fieldset>)}
+              <form onSubmit={e => { e.preventDefault(); const tag = customTag.trim(); if (tag && !tags.includes(tag)) toggleTag(tag); setCustomTag(''); }}>
+                <input aria-label="Custom tag" value={customTag} onChange={e => setCustomTag(e.target.value)} placeholder="Custom tag" />
+                <button type="submit">Add tag</button>
+              </form>
+              <button type="button" disabled={!tags.length} onClick={() => updateNodeData(id, { tags: [] })}>No Tag</button>
+            </div>}
+          </div>
+          <button type="button" onClick={autoSort}>Auto Sort</button>
+          <button type="button" onClick={() => { void deleteElements({ nodes: [{ id }] }); }}>UnGroup</button>
+        </div>
+      </NodeToolbar>
       <CornerDelete id={id} />
       <NodeResizer
         minWidth={200}
@@ -797,7 +890,11 @@ export function GroupNode({ data, id, selected }: NodeProps) {
       />
       <div className="group-label">
         <SquareDashed size={11} strokeWidth={1.5} aria-hidden />
-        <span>{d.label ?? 'Group'}</span>
+        {editing ? <input className="nodrag nopan" aria-label="Group name" autoFocus value={name}
+          onChange={e => setName(e.target.value)} onBlur={commitName}
+          onKeyDown={e => { e.stopPropagation(); if (e.key === 'Enter') commitName(); if (e.key === 'Escape') setEditing(false); }} />
+          : <span onDoubleClick={e => { e.stopPropagation(); setName(d.label ?? 'Group'); setEditing(true); }} title="Double-click to rename">{d.label ?? 'Group'}</span>}
+        {tags.map(tag => <span className="group-tag-badge" key={tag}>{tag}</span>)}
       </div>
     </div>
   );

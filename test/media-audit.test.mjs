@@ -39,3 +39,18 @@ test('read-only audit protects nested references, backups, browser refs and rece
   const failed = auditMedia(args);
   assert.equal(failed.totals.candidateFiles, 0); assert.ok(failed.warnings.length);
 });
+
+test('SQLite graph is active while retained migration JSON remains backup protected', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fc-audit-sqlite-'));
+  const projectsDir = path.join(dir, 'projects'), jobsDir = path.join(dir, 'jobs');
+  fs.mkdirSync(projectsDir); fs.mkdirSync(jobsDir);
+  for (const name of ['current', 'legacy']) {
+    const file = path.join(jobsDir, `${name}.mp4`);
+    fs.writeFileSync(file, name); fs.utimesSync(file, new Date(0), new Date(0));
+  }
+  fs.writeFileSync(path.join(projectsDir, 'p.json'), JSON.stringify({ url: '/api/generated/legacy.mp4' }));
+  const report = auditMedia({ projectsDir, jobsDir, projects: [{ nodes: [{ data: { resultUrl: '/api/generated/current.mp4' } }] }] });
+  assert.equal(report.files.find(f => f.url.endsWith('/current.mp4')).state, 'referenced');
+  assert.equal(report.files.find(f => f.url.endsWith('/legacy.mp4')).state, 'backup-protected');
+  assert.equal(report.totals.candidateFiles, 0);
+});
