@@ -47,7 +47,7 @@ type Strings = Record<string, string>;
 
 const en: Strings = {
   // Sidebar
-  sidebar_brand: 'IP OS',
+  sidebar_brand: 'IPOS',
   sidebar_canvas: 'Canvas',
   sidebar_comparison: 'Comparison',
   sidebar_projects: 'Projects',
@@ -124,7 +124,7 @@ const en: Strings = {
 };
 
 const zhCN: Strings = {
-  sidebar_brand: 'IP OS',
+  sidebar_brand: 'IPOS',
   sidebar_canvas: '画布',
   sidebar_comparison: '模型对比',
   sidebar_projects: '项目',
@@ -194,7 +194,7 @@ const zhCN: Strings = {
 };
 
 const ja: Strings = {
-  sidebar_brand: 'IP OS',
+  sidebar_brand: 'IPOS',
   sidebar_canvas: 'キャンバス',
   sidebar_comparison: 'モデル比較',
   sidebar_projects: 'プロジェクト',

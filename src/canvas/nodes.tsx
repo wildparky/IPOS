@@ -4,7 +4,7 @@
 import { Handle, NodeResizer, NodeToolbar, Position, useReactFlow, useStore, useUpdateNodeInternals, type NodeProps } from '@xyflow/react';
 import { useEffect, useState, useRef, type CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
-import { Upload, ImageIcon, Film, Type, SquareDashed, Clapperboard, ImagePlus, Upload as ReplaceIcon, Loader2, Music, X, Plus } from 'lucide-react';
+import { Upload, ImageIcon, Film, Type, SquareDashed, Clapperboard, ImagePlus, Upload as ReplaceIcon, Loader2, Music, X, Plus, Tags, LayoutGrid, Ungroup } from 'lucide-react';
 import NodeFrame from './NodeFrame';
 import NodeActionMenu from './NodeActionMenu';
 import VideoSettingsPanel, { type VideoSettings, type AspectRatio, type VideoInputMode } from './VideoSettingsPanel';
@@ -12,6 +12,10 @@ import LyricsPanel, { type LyricsMode } from './LyricsPanel';
 import ModelDropdown from '../components/ModelDropdown';
 import Lightbox from './Lightbox';
 import { useCanvasCtx } from './CanvasContext';
+import { isInsideGroup } from './groupBounds';
+import { arrangeNodes } from './arrangeNodes';
+import { NodeTagToolbar } from './NodeTagControl';
+import ProductionStatusIcon from './ProductionStatusIcon';
 
 export type NodeStatus = 'idle' | 'running' | 'done' | 'error';
 
@@ -159,7 +163,7 @@ function StatusPill({ status }: { status: NodeStatus }) {
 
 // Triggers a browser download for a remote URL — handles same-origin
 // blobs and cross-origin URLs by fetching the bytes when needed.
-async function downloadUrl(url: string, suggestedName: string) {
+export async function downloadUrl(url: string, suggestedName: string) {
   try {
     const r = await fetch(url, { mode: 'cors' });
     const blob = await r.blob();
@@ -769,9 +773,11 @@ export function TextNode({ data, id }: NodeProps) {
   return (
     <div className="canvas-card-wrap">
     <div className="canvas-node node-text">
+      <NodeTagToolbar id={id} />
       <CornerDelete id={id} />
       <Handle type="target" position={Position.Left} id={`${id}-in`} />
       <NodeHeader icon={Type} title="Text / LLM" status={d.status ?? 'idle'} />
+      <ProductionStatusIcon id={id} />
       <div className="node-body">
         <ModelDropdown
           className="node-model-dd nodrag"
@@ -801,12 +807,18 @@ export function TextNode({ data, id }: NodeProps) {
 
 // ── Group / frame ──
 export function GroupNode({ data, id, selected }: NodeProps) {
-  const d = data as { label?: string; tags?: string[]; memberIds?: string[] };
-  const { updateNodeData, setNodes, deleteElements } = useReactFlow();
+  const multiSelected = useStore(s => s.nodes.filter(n => n.selected).length > 1);
+  const d = data as { label?: string; tags?: string[]; memberIds?: string[]; productionStatus?: string | null; assetType?: string | null };
+  const statuses: Record<string, string> = { WIP: '#3b82f6', REVIEW: '#f97316', APPROVED: '#22c55e', HOLD: '#9ca3af' };
+  const assetTypes = ['Char', 'Scene', 'Prop', 'Reference', 'KeyShot', 'Concept'];
+  const legacyStatus: Record<string, string> = { 'In progress': 'WIP', 'Needs review': 'REVIEW', Approved: 'APPROVED', 'On hold': 'HOLD' };
+  const status = d.productionStatus !== undefined ? d.productionStatus : (d.tags ?? []).map(t => legacyStatus[t] ?? (statuses[t] ? t : undefined)).find(Boolean);
+  const assetType = d.assetType !== undefined ? d.assetType : (d.tags ?? []).find(t => assetTypes.includes(t));
+  const statusColor = status ? statuses[status] : undefined;
+  const { updateNodeData, setNodes, deleteElements, getEdges } = useReactFlow();
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState('');
   const [tagOpen, setTagOpen] = useState(false);
-  const [customTag, setCustomTag] = useState('');
   const tagRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!selected) setTagOpen(false);
@@ -819,10 +831,6 @@ export function GroupNode({ data, id, selected }: NodeProps) {
     document.addEventListener('pointerdown', close);
     return () => document.removeEventListener('pointerdown', close);
   }, [tagOpen]);
-  const tags = d.tags ?? [];
-  const toggleTag = (tag: string) => updateNodeData(id, {
-    tags: tags.includes(tag) ? tags.filter(t => t !== tag) : [...tags, tag],
-  });
   const commitName = () => {
     updateNodeData(id, { label: name.trim() || 'Group' });
     setEditing(false);
@@ -834,50 +842,45 @@ export function GroupNode({ data, id, selected }: NodeProps) {
     const height = group.measured?.height ?? group.height ?? 240;
     const members = nodes.filter(n => {
       if (n.id === id || n.type === 'group') return false;
-      if (Array.isArray(d.memberIds)) return d.memberIds.includes(n.id);
+      if (Array.isArray(d.memberIds)) return d.memberIds.includes(n.id) && isInsideGroup(n, group);
       const x = n.position.x + (n.measured?.width ?? n.width ?? 280) / 2;
       const y = n.position.y + (n.measured?.height ?? n.height ?? 280) / 2;
       return x >= group.position.x && x <= group.position.x + width && y >= group.position.y && y <= group.position.y + height;
     }).sort((a, b) => a.position.y - b.position.y || a.position.x - b.position.x);
     if (!members.length) return nodes;
-    const columns = Math.ceil(Math.sqrt(members.length));
-    const cellWidth = Math.max(...members.map(n => n.measured?.width ?? n.width ?? 280));
-    const positions = new Map<string, { x: number; y: number }>();
-    let y = group.position.y + 40;
-    for (let i = 0; i < members.length; i += columns) {
-      const row = members.slice(i, i + columns);
-      row.forEach((n, col) => positions.set(n.id, { x: group.position.x + 24 + col * (cellWidth + 32), y }));
-      y += Math.max(...row.map(n => n.measured?.height ?? n.height ?? 280)) + 40;
-    }
+    const layout = arrangeNodes(members, getEdges(), { x: group.position.x + 24, y: group.position.y + 40 });
+    const { positions } = layout;
     return nodes.map(n => n.id === id ? {
-      ...n, width: columns * cellWidth + (columns - 1) * 32 + 48,
-      height: y - group.position.y - 16,
+      ...n, width: layout.width + 48,
+      height: layout.height + 64,
       data: { ...n.data, memberIds: members.map(m => m.id) },
     } : positions.has(n.id) ? { ...n, position: positions.get(n.id)! } : n);
   });
   return (
-    <div className="canvas-group">
-      <NodeToolbar isVisible={selected} position={Position.Top} offset={36}>
-        <div className="group-actions nodrag nopan" onClick={e => e.stopPropagation()}>
+    <div className="canvas-group" style={{ backgroundColor: statusColor ? `rgb(${parseInt(statusColor.slice(1, 3), 16)} ${parseInt(statusColor.slice(3, 5), 16)} ${parseInt(statusColor.slice(5, 7), 16)} / 0.048)` : 'rgba(163,230,53,0.048)', borderColor: statusColor }}>
+      <NodeToolbar isVisible={selected && !multiSelected} position={Position.Top} offset={36}>
+        <div className="group-actions node-toolbar-pill-row nodrag nopan" role="toolbar" aria-label="Group actions" onClick={e => e.stopPropagation()}>
           <div ref={tagRef}>
-            <button type="button" aria-expanded={tagOpen} onClick={() => setTagOpen(v => !v)}>Tag</button>
+            <button type="button" className="toolbar-btn" aria-label="Tag" title="Tag" aria-expanded={tagOpen} aria-pressed={tagOpen} onClick={() => setTagOpen(v => !v)}><Tags size={16} aria-hidden /></button>
             {tagOpen && <div className="group-tag-menu" role="dialog" aria-label="Group tags">
-              {[
-                ['Production status', 'In progress', 'Needs review', 'Approved'],
-                ['Purpose', 'Reference', 'Inspiration', 'On hold'],
-              ].map(([heading, ...options]) => <fieldset key={heading}>
-                <legend>{heading}</legend>
-                {options.map(tag => <button type="button" key={tag} aria-pressed={tags.includes(tag)} onClick={() => toggleTag(tag)}>{tag}</button>)}
-              </fieldset>)}
-              <form onSubmit={e => { e.preventDefault(); const tag = customTag.trim(); if (tag && !tags.includes(tag)) toggleTag(tag); setCustomTag(''); }}>
-                <input aria-label="Custom tag" value={customTag} onChange={e => setCustomTag(e.target.value)} placeholder="Custom tag" />
-                <button type="submit">Add tag</button>
-              </form>
-              <button type="button" disabled={!tags.length} onClick={() => updateNodeData(id, { tags: [] })}>No Tag</button>
+              <fieldset>
+                <legend>Production Status</legend>
+                {Object.entries(statuses).map(([value, color]) => <label key={value} style={{ color }}>
+                  <input type="radio" name={`status-${id}`} checked={status === value} onChange={() => updateNodeData(id, { productionStatus: value })} /> {value}
+                </label>)}
+              </fieldset>
+              <hr />
+              <fieldset>
+                <legend>어셋타입</legend>
+                {assetTypes.map(value => <label key={value}>
+                  <input type="radio" name={`asset-type-${id}`} checked={assetType === value} onChange={() => updateNodeData(id, { assetType: value })} /> {value}
+                </label>)}
+              </fieldset>
+              <button type="button" disabled={!status && !assetType} onClick={() => updateNodeData(id, { productionStatus: null, assetType: null, tags: [] })}>No Tag</button>
             </div>}
           </div>
-          <button type="button" onClick={autoSort}>Auto Sort</button>
-          <button type="button" onClick={() => { void deleteElements({ nodes: [{ id }] }); }}>UnGroup</button>
+          <button type="button" className="toolbar-btn" aria-label="Auto Arrange" title="Auto Arrange" onClick={autoSort}><LayoutGrid size={16} aria-hidden /></button>
+          <button type="button" className="toolbar-btn" aria-label="UnGroup" title="UnGroup" onClick={() => { void deleteElements({ nodes: [{ id }] }); }}><Ungroup size={16} aria-hidden /></button>
         </div>
       </NodeToolbar>
       <CornerDelete id={id} />
@@ -889,12 +892,14 @@ export function GroupNode({ data, id, selected }: NodeProps) {
         handleClassName="group-resize-handle"
       />
       <div className="group-label">
+        <ProductionStatusIcon id={id} />
         <SquareDashed size={11} strokeWidth={1.5} aria-hidden />
         {editing ? <input className="nodrag nopan" aria-label="Group name" autoFocus value={name}
           onChange={e => setName(e.target.value)} onBlur={commitName}
           onKeyDown={e => { e.stopPropagation(); if (e.key === 'Enter') commitName(); if (e.key === 'Escape') setEditing(false); }} />
           : <span onDoubleClick={e => { e.stopPropagation(); setName(d.label ?? 'Group'); setEditing(true); }} title="Double-click to rename">{d.label ?? 'Group'}</span>}
-        {tags.map(tag => <span className="group-tag-badge" key={tag}>{tag}</span>)}
+        {status && <span className="group-tag-badge" style={{ color: statusColor, borderColor: statusColor }}>{status}</span>}
+        {assetType && <span className="group-tag-badge">{assetType}</span>}
       </div>
     </div>
   );
@@ -1180,8 +1185,10 @@ export function TimelineNode({ data, id }: NodeProps) {
       <Handle type="target" position={Position.Left} id={`${id}-in`} />
       <Handle type="source" position={Position.Bottom} id={`${id}-out`} />
       <div className="canvas-node node-timeline">
+        <NodeTagToolbar id={id} />
         <CornerDelete id={id} />
         <div className="timeline-head">
+          <ProductionStatusIcon id={id} />
           <Clapperboard size={13} strokeWidth={1.75} aria-hidden />
           <span>{d.title || 'Timeline'}</span>
           <span className="timeline-head-spacer" />

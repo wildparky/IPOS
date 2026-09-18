@@ -20,6 +20,7 @@ import { agentChat, getProviderStatus, summarizeTurns, type ChatTurn, type ToolC
 import { useAgentPrefs, type AgentMode } from './agentPrefsStore';
 import { useAgentSessions, type TraceItem, type TraceStatus } from './agentSessionsStore';
 import { executeToolCall, toolLabel, estimateToolCost, CONFIRM_TOOLS, type CanvasAgentApi } from './agentTools';
+import { useUiStore } from '../uiStore';
 
 const DEFAULT_AGENT_MODEL = 'gpt-5.6-luna';
 interface CodexModel { id: string; label: string; defaultEffort?: string; efforts?: string[] }
@@ -56,6 +57,8 @@ function toolIcon(name: string) {
 }
 
 export default function AgentPanel({ open, onClose, api }: Props) {
+  const agentDraftAddition = useUiStore((s) => s.agentDraftAddition);
+  const clearAgentDraftAddition = useUiStore((s) => s.clearAgentDraftAddition);
   const mode = useAgentPrefs((s) => s.mode);
   const setMode = useAgentPrefs((s) => s.setMode);
   const imageModel = useAgentPrefs((s) => s.imageModel);
@@ -66,6 +69,12 @@ export default function AgentPanel({ open, onClose, api }: Props) {
   const [codexModels, setCodexModels] = useState<CodexModel[]>(FALLBACK_CODEX_MODELS);
   const selectedCodexModel = codexModels.find((item) => item.id === model) ?? codexModels[0];
   const [reasoningEffort, setReasoningEffort] = useState(selectedCodexModel.defaultEffort || 'medium');
+
+  useEffect(() => {
+    if (!agentDraftAddition) return;
+    setInput((current) => current ? `${current}\n${agentDraftAddition}` : agentDraftAddition);
+    clearAgentDraftAddition();
+  }, [agentDraftAddition, clearAgentDraftAddition]);
 
   useEffect(() => {
     let cancelled = false;

@@ -296,7 +296,7 @@ function AboutPane() {
       </div>
       <p className="settings-foot-note">{t('about_blurb')}</p>
       <dl className="settings-kv">
-        <div><dt>{t('about_version')}</dt><dd>0.1.0</dd></div>
+        <div><dt>{t('about_version')}</dt><dd>0.2.0</dd></div>
         <div><dt>{t('about_gateway')}</dt><dd>BlockRun · Account API · x402 on Solana &amp; Base</dd></div>
       </dl>
       <h3 className="settings-subhead">{t('about_credits')}</h3>
@@ -550,7 +550,7 @@ export default function SettingsDialog({ open, onClose, initial = 'wallet' }: Pr
 
         <main className="settings-pane">
           <header className="settings-pane-head">
-            <span className="settings-version">v0.1.0</span>
+            <span className="settings-version">v0.2.0</span>
             <button className="settings-close" onClick={onClose} aria-label={t('settings_close')}>
               <X size={16} aria-hidden />
             </button>

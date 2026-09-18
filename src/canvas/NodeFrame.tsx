@@ -17,6 +17,8 @@ import type { NodeStatus } from './nodes';
 import SaveToCollectionMenu, { type SaveItem } from './SaveToCollectionMenu';
 import { useCollectionsStore } from '../collectionsStore';
 import { useCanvasCtx } from './CanvasContext';
+import NodeTagControl from './NodeTagControl';
+import ProductionStatusIcon from './ProductionStatusIcon';
 
 export interface ToolbarItem {
   id: string;
@@ -118,7 +120,8 @@ export default function NodeFrame({
   // hover into the mix.
   const [hover, setHover] = useState(false);
   const selected = useStore((s) => s.nodes.find((n) => n.id === id)?.selected ?? false);
-  const toolbarVisible = hover || selected;
+  const multiSelected = useStore(s => s.nodes.filter(n => n.selected).length > 1);
+  const toolbarVisible = !multiSelected && (hover || selected);
 
   return (
     <div
@@ -141,6 +144,7 @@ export default function NodeFrame({
           onClick={(e) => e.stopPropagation()}
           aria-label="Node title"
         />
+        <ProductionStatusIcon id={id} />
         {status === 'done' && (
           <CheckCircle2 size={13} className="node-title-check" aria-hidden />
         )}
@@ -167,6 +171,7 @@ export default function NodeFrame({
           ))}
         </ul>
         <div className="toolbar-divider" aria-hidden />
+        <NodeTagControl id={id} />
         <ul className="toolbar-group">
           {right.map((it) => (
             <li key={it.id}>

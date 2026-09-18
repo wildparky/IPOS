@@ -4,7 +4,7 @@
 // width animates between expanded (240px) and collapsed (56px); labels fade.
 
 import {
-  Workflow, LayoutGrid, Wallet as WalletIcon, Settings,
+  Workflow, LayoutGrid, Settings,
   LibraryBig, Columns3, PanelLeftClose, PanelLeftOpen,
 } from 'lucide-react';
 import type { Route } from '../types';
@@ -39,7 +39,7 @@ export default function Sidebar({ route, collapsed = false, onNavigate, onToggle
       <div className="sidebar-brand">
         <span className="sidebar-brand-mark">
           <img src="/mofac-logo.svg" className="brand-logo brand-logo-mofac" alt="MOFAC" />
-          <span>{t('sidebar_brand')}</span>
+          <span aria-label={t('sidebar_brand')}>IP<span className="sidebar-brand-os">OS</span></span>
         </span>
         {onToggleCollapse && (
           <button
@@ -85,15 +85,6 @@ export default function Sidebar({ route, collapsed = false, onNavigate, onToggle
       <div className="sidebar-footer">
         <button
           className="nav-item"
-          onClick={() => onOpenSettings?.('wallet')}
-          aria-label={t('sidebar_wallet')}
-          title={collapsed ? t('sidebar_wallet') : undefined}
-        >
-          <WalletIcon size={16} strokeWidth={1.75} aria-hidden />
-          <span>{t('sidebar_wallet')}</span>
-        </button>
-        <button
-          className="nav-item"
           onClick={() => onOpenSettings?.('canvas')}
           aria-label={t('sidebar_settings')}
           title={collapsed ? t('sidebar_settings') : undefined}
@@ -101,7 +92,7 @@ export default function Sidebar({ route, collapsed = false, onNavigate, onToggle
           <Settings size={16} strokeWidth={1.75} aria-hidden />
           <span>{t('sidebar_settings')}</span>
         </button>
-        <div className="version" aria-hidden>franklin-canvas · v0.1.0</div>
+        <div className="version" aria-hidden>IPOS v0.2.0</div>
       </div>
     </nav>
   );

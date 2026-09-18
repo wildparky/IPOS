@@ -66,7 +66,7 @@ export function blockProject(id: string, error: unknown, draft?: { nodes: Node[]
     if (p && draft) put({ ...p, ...draft });
     const first = !blocked.has(id); blocked.add(id);
     const message = (error as Error).message || '프로젝트 동기화 충돌';
-    setSync(id, '저장 중단: ' + message);
+    setSync(id, 'Save paused: ' + message);
     try { localStorage.setItem('franklin-recovery:' + id, JSON.stringify(full.get(id))); } catch {}
     if (first) alert('프로젝트 저장 중단: ' + message + '\nProjects의 복구본 내보내기로 작업을 보관할 수 있습니다.');
 }
@@ -81,11 +81,11 @@ async function drain() {
                 if (blocked.has(id) || !hasChanges(id)) continue;
                 const snap = structuredClone(full.get(id)!), base = acknowledged.get(id);
                 try {
-                    setSync(id, '저장 중…');
+                    setSync(id, 'Saving…');
                     if (deleting.has(id)) {
                         await request('/api/projects/delete', { id, baseRevision: base?.revision ?? null });
                         full.delete(id); acknowledged.delete(id); deleting.delete(id);
-                        summaries = summaries.filter(p => p.id !== id); setSync(id, '삭제됨'); notify(); continue;
+                        summaries = summaries.filter(p => p.id !== id); setSync(id, 'Deleted'); notify(); continue;
                     }
                     const d = partial && base
                         ? await request('/api/projects/patch', { id, patch: { ...graphPatch(base, snap), baseRevision: base.revision } })
@@ -95,7 +95,7 @@ async function drain() {
                     const remote = cleanGraph(d.project as Project), latest = canonicalMedia(full.get(id) ?? snap);
                     const merged = mergeProject(canonicalMedia(snap), latest, remote);
                     acknowledged.set(id, remote); publish(merged);
-                    if (!blocked.has(id)) setSync(id, '저장됨');
+                    if (!blocked.has(id)) setSync(id, 'Saved');
                 } catch (e) { blockProject(id, e); }
             }
         }
@@ -133,10 +133,10 @@ export async function pollProject(id: string) {
         if (busy || hasChanges(id) || blocked.has(id) || acknowledged.get(id) !== base) return;
         const remote = cleanGraph(data.project as Project);
         if (remote.revision !== base.revision) { acknowledged.set(id, remote); publish(remote); }
-        setSync(id, '동기화됨');
+        setSync(id, 'Synced');
     } catch (e) {
         if ((e as { status?: number }).status === 404) blockProject(id, new Error('다른 브라우저에서 프로젝트를 삭제했습니다. 초안을 복구본으로 보관하세요.'));
-        else setSync(id, '연결 확인 필요 · 로컬 변경은 보존됩니다');
+        else setSync(id, 'Connection lost · Local changes preserved');
     }
 }
 export async function loadCurrentProject() {

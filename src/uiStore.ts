@@ -13,6 +13,9 @@ interface UiState {
   // Agent chat panel — opened from the cute icon next to the prompt bar.
   agentOpen: boolean;
   setAgentOpen: (open: boolean) => void;
+  agentDraftAddition: string;
+  queueAgentReferences: (text: string) => void;
+  clearAgentDraftAddition: () => void;
 }
 
 export const useUiStore = create<UiState>((set) => ({
@@ -22,4 +25,7 @@ export const useUiStore = create<UiState>((set) => ({
   setCollectionsOpen: (collectionsOpen) => set({ collectionsOpen }),
   agentOpen: false,
   setAgentOpen: (agentOpen) => set({ agentOpen }),
+  agentDraftAddition: '',
+  queueAgentReferences: (text) => set({ agentOpen: true, agentDraftAddition: text }),
+  clearAgentDraftAddition: () => set({ agentDraftAddition: '' }),
 }));

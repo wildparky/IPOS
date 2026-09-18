@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useState, useRef } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useState, useRef, type CSSProperties } from 'react';
 import {
   ReactFlow,
   ReactFlowProvider,
@@ -24,6 +24,8 @@ import AgentMascot from '../components/AgentMascot';
 import { useAgentPrefs } from '../canvas/agentPrefsStore';
 import { EDGE_TYPES } from '../canvas/edges';
 import PromptBar from '../canvas/PromptBar';
+import MultiSelectionToolbar from '../canvas/MultiSelectionToolbar';
+import { isInsideGroup } from '../canvas/groupBounds';
 import { calculateCodexOutputSize, type ImageRatio } from '../canvas/ImageSettingsPanel';
 import PromptLibrary from '../canvas/PromptLibrary';
 import CollectionsPanel from '../canvas/CollectionsPanel';
@@ -111,11 +113,18 @@ function CanvasInner() {
   const [project] = useState(() => getOrCreateCurrent({ nodes: INITIAL_NODES, edges: INITIAL_EDGES }));
   const projectIdRef = useRef(project.id);
   const [nodes, setNodes, onNodesChange] = useNodesState(project.nodes);
+  const knownNodeIds = useRef(new Set(project.nodes.map(n => n.id)));
   const [edges, setEdges, onEdgesChange] = useEdgesState(project.edges);
   const syncedCanvas = useRef(cleanGraph(project));
   // Capture local drafts immediately. Network writes are debounced by the store,
   // so remote responses cannot race a 400ms canvas-only draft.
   useLayoutEffect(() => {
+    const fresh = new Set(nodes.filter(n => !knownNodeIds.current.has(n.id) && n.data.productionStatus === undefined).map(n => n.id));
+    nodes.forEach(n => knownNodeIds.current.add(n.id));
+    if (fresh.size) {
+      setNodes(current => current.map(n => fresh.has(n.id) ? { ...n, data: { ...n.data, productionStatus: 'WIP' } } : n));
+      return;
+    }
     saveProjectCanvas(projectIdRef.current, nodes, edges);
     syncedCanvas.current = cleanGraph(canonicalMedia({ ...syncedCanvas.current, nodes, edges }));
   }, [nodes, edges]);
@@ -211,6 +220,7 @@ function CanvasInner() {
         // Snapshot undo cannot safely cross a remote update; do not undo a peer's work.
         historyRef.current = { past: [], future: [] }; isUndoRedoRef.current = true;
         const localNodes = new Map(currentNodes.map(n => [n.id, n]));
+        remote.nodes.forEach(n => knownNodeIds.current.add(n.id));
         const localEdges = new Map(currentEdges.map(e => [e.id, e]));
         setNodes(merged.nodes.map(n => ({ ...n, selected: localNodes.get(n.id)?.selected ?? false })));
         setEdges(merged.edges.map(e => ({ ...e, selected: localEdges.get(e.id)?.selected ?? false })));
@@ -326,7 +336,7 @@ function CanvasInner() {
       .filter((n) => n.id !== node.id && n.type !== 'group')
       .filter((n) => {
         const memberIds = node.data.memberIds;
-        if (Array.isArray(memberIds)) return memberIds.includes(n.id);
+        if (Array.isArray(memberIds)) return memberIds.includes(n.id) && isInsideGroup(n, node);
         const w = n.measured?.width ?? (n.width as number) ?? 0;
         const h = n.measured?.height ?? (n.height as number) ?? 0;
         const cx = n.position.x + w / 2;
@@ -352,7 +362,18 @@ function CanvasInner() {
 
   const onNodeDragStop = useCallback(() => {
     dragGroupRef.current = null;
-  }, []);
+    setNodes(current => current.map(group => {
+      if (group.type !== 'group') return group;
+      const memberIds = current
+        .filter(n => n.id !== group.id && n.type !== 'group' && isInsideGroup(n, group))
+        .map(n => n.id);
+      const previous = Array.isArray(group.data.memberIds) ? group.data.memberIds : [];
+      return Array.isArray(group.data.memberIds) && memberIds.length === previous.length
+        && memberIds.every(id => previous.includes(id)) ? group : {
+        ...group, data: { ...group.data, memberIds },
+      };
+    }));
+  }, [setNodes]);
 
   const defaultEdgeOptions = { type: 'flow' };
 
@@ -1225,7 +1246,6 @@ function CanvasInner() {
   return (
     <div className="canvas-host">
       <div className="canvas-toolbar">
-        {syncMessage && <span role="status" title={syncMessage} style={{ fontSize: 11, maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: syncMessage.startsWith('저장 중단') ? '#f99' : 'var(--text-muted)' }}>{syncMessage}</span>}
         <input
           className="canvas-brand-input"
           value={projectName}
@@ -1237,13 +1257,14 @@ function CanvasInner() {
           title="Rename project"
           spellCheck={false}
         />
+        {syncMessage && <span role="status" title={syncMessage} style={{ fontSize: 11, maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: syncMessage.startsWith('Save paused') ? '#f99' : 'var(--text-muted)' }}>{syncMessage.startsWith('Save paused') ? 'Save paused' : syncMessage}</span>}
         <div className="canvas-toolbar-divider" aria-hidden />
         {/* Inline node-add bar — grouped by category (Generate / Utility /
            Resource), separated by dividers so the three intents read at a
            glance without bloating width. */}
         <ul className="canvas-add-row" aria-label="Add a node">
           {(['generate', 'utility', 'resource'] as const).flatMap((cat, ci) => {
-            const entries = NODE_CATALOG.filter((e) => e.category === cat);
+            const entries = NODE_CATALOG.filter((e) => e.category === cat && e.type !== 'group');
             if (entries.length === 0) return [];
             const sep = ci > 0
               ? [<li key={`sep-${cat}`} className="canvas-add-group-sep" role="separator" aria-hidden />]
@@ -1307,7 +1328,13 @@ function CanvasInner() {
             }
           }}
           onDrop={dropImages}
-          nodes={nodes}
+          nodes={nodes.map(node => {
+            const colors: Record<string, string> = { WIP: '#3b82f6', REVIEW: '#f97316', APPROVED: '#22c55e', HOLD: '#9ca3af' };
+            const legacy: Record<string, string> = { 'In progress': 'WIP', 'Needs review': 'REVIEW', Approved: 'APPROVED', 'On hold': 'HOLD' };
+            const status = node.data.productionStatus !== undefined ? node.data.productionStatus
+              : (Array.isArray(node.data.tags) ? node.data.tags.map(t => legacy[String(t)] ?? t).find(t => colors[String(t)]) : undefined);
+            return { ...node, style: { ...node.style, '--node-status-color': colors[String(status)] ?? 'var(--accent-ring)' } as CSSProperties };
+          })}
           edges={edges}
           onNodesChange={onNodesChange}
           onEdgesChange={onEdgesChange}
@@ -1333,7 +1360,7 @@ function CanvasInner() {
           // Canvas navigation follows the familiar editor convention:
           // middle-button drag pans, while left-button drag on empty space
           // creates a multi-selection marquee.
-          panOnDrag={[2]}
+          panOnDrag={[1]}
           selectionOnDrag
           selectionMode={SelectionMode.Partial}
           selectNodesOnDrag={false}
@@ -1344,6 +1371,7 @@ function CanvasInner() {
           maxZoom={Infinity}
         >
           {showDots && <Background variant={BackgroundVariant.Dots} gap={20} size={1.2} color={bgDotColor} />}
+          <MultiSelectionToolbar />
           {showMinimap && <MiniMap pannable zoomable maskColor={minimapMask} />}
         </ReactFlow>
         <CanvasViewBar />
