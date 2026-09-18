@@ -40,8 +40,8 @@ export default function App() {
         <a className="mofac-home-link" href="https://mofacstudios.com/" target="_blank" rel="noopener noreferrer" title="MOFAC Studios"><img src="/mofac-logo.svg" alt="MOFAC" /></a>
         <span className="ipos-brand-text">
           <img className="ipos-symbol" src="/ipos-logo.png" alt="IPOS logo" />
-          <span className="ipos-wordmark">IP<span>OS</span></span>
-          <span className="ipos-version">v0.2.0</span>
+          <span className="ipos-wordmark">iP<span>os</span></span>
+          <span className="ipos-version">v1.2.5</span>
         </span>
         <button type="button" title="Settings" aria-label="Settings" onClick={() => openSettings('canvas')}><Settings size={17} /></button>
       </div>

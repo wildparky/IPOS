@@ -1367,8 +1367,8 @@ function CanvasInner({ onOpenProject, onProjects }: { onOpenProject: () => void;
         >
           {showDots && <Background variant={BackgroundVariant.Dots} gap={20} size={1.2} color={bgDotColor} />}
           <div className="canvas-watermark" aria-hidden="true">
-            <svg viewBox="0 0 700 140" focusable="false">
-              <text x="350" y="110" textAnchor="middle" fontFamily="Arial, sans-serif" fontSize="120" fontWeight="900" textLength="690" lengthAdjust="spacingAndGlyphs"><tspan fill="#ff8c00">ON</tspan><tspan fill="#808080">TORY</tspan></text>
+            <svg viewBox="0 0 260 140" focusable="false">
+              <text x="130" y="110" textAnchor="middle" fontFamily="Arial, sans-serif" fontSize="120" fontWeight="900"><tspan fill="#7d7d7d">iP</tspan><tspan fill="#a3e635">os</tspan></text>
             </svg>
           </div>
           <MultiSelectionToolbar />

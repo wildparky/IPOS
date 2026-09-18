@@ -10,7 +10,7 @@
 @media (max-width: 600px) {
   .ipos-shell .projects-head { position: static; margin-bottom: 16px; }
 }
-.canvas-watermark { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; pointer-events: none; user-select: none; z-index: 0; opacity: 0.1; }
+.canvas-watermark { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; pointer-events: none; user-select: none; z-index: 0; opacity: 0.08; }
 .canvas-watermark svg { display: block; width: 70%; height: auto; overflow: visible; }
 .ipos-brand-header { position: absolute; left: 16px; top: 0; height: 60px; display: flex; align-items: center; gap: 10px; z-index: 40; }
 .ipos-brand-header img { width: 90px; height: 34px; object-fit: contain; }
