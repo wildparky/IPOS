@@ -1,5 +1,10 @@
 # 변경 이력
 
+## 미발행 — 저장소 이름 변경
+
+- GitHub 저장소를 `wildparky/IPOS`로 변경하고 로컬 origin 및 문서·앱 저장소 링크 갱신
+- 기존 커밋·이슈·태그·릴리스 유지. 패키지 식별자, 프로젝트·미디어 저장 경로 및 브라우저 저장 키는 유지
+
 ## v0.2.0 — 2026-09-18
 
 - 브랜드를 IPOS로 통일하고 OS를 녹색으로 표시, 하단 및 Settings 버전을 0.2.0으로 변경
@@ -48,7 +53,7 @@ typecheck·build 통과(기존 큰 번들 경고 유지). Node SQLite experiment
 
 ## 2026-09-18 — fb6ff30
 
-커밋: [Codex·TopView 브리지와 서버 기반 Canvas](https://github.com/wildparky/franklin-canvas/commit/fb6ff30)
+커밋: [Codex·TopView 브리지와 서버 기반 Canvas](https://github.com/wildparky/IPOS/commit/fb6ff30)
 
 - 공식 호스트 기반 Codex 위임과 TopView MCP 영상 실행 경로 추가
 - Seedance 모델·모드 설정, 제공자 진행률, 참조 업로드와 결과 파일 가져오기 추가

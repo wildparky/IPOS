@@ -6,7 +6,7 @@
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
-    "url": "https://github.com/BlockRunAI/franklin-canvas"
+    "url": "https://github.com/wildparky/IPOS"
   },
   "files": [
     "dist"

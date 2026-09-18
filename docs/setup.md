@@ -9,8 +9,8 @@ SQLite 저장소는 Node.js 24 이상을 기준으로 검증합니다(`node:sqli
 ## 로컬 실행
 
 ```powershell
-git clone https://github.com/wildparky/franklin-canvas.git
-cd franklin-canvas
+git clone https://github.com/wildparky/IPOS.git
+cd IPOS
 npm ci
 ```
 

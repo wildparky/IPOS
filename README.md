@@ -1,4 +1,6 @@
-<h1 align="center">Franklin Canvas</h1>
+<h1 align="center">IPOS</h1>
+
+저장소 이름이 `franklin-canvas`에서 `IPOS`로 변경되었습니다. 기존 영문 설명은 유지하며, 로컬 작업 폴더와 프로젝트·미디어 저장 경로는 변경하지 않습니다.
 
 <p align="center">
 A node-based AI media studio — generate <strong>images, video and music</strong> on an
@@ -7,7 +9,7 @@ infinite canvas, chain them into visual workflows, and let an <strong>AI agent</
 </p>
 
 <p align="center">
-<a href="https://github.com/BlockRunAI/franklin-canvas/blob/main/LICENSE"><img alt="License" src="https://img.shields.io/badge/license-Apache--2.0-blue.svg"></a>
+<a href="https://github.com/wildparky/IPOS/blob/main/LICENSE"><img alt="License" src="https://img.shields.io/badge/license-Apache--2.0-blue.svg"></a>
 <a href="https://github.com/BlockRunAI/Franklin"><img alt="Built on Franklin" src="https://img.shields.io/badge/built%20on-Franklin-a3e635.svg"></a>
 <img alt="Chains" src="https://img.shields.io/badge/chains-Solana%20%C2%B7%20Base-cba.svg">
 <img alt="x402" src="https://img.shields.io/badge/payment-x402-blue.svg">
@@ -126,8 +128,8 @@ Create a free account at **[user.blockrun.ai](https://user.blockrun.ai)**, add c
 [API Keys](https://user.blockrun.ai/dashboard/keys).
 
 ```bash
-git clone https://github.com/BlockRunAI/franklin-canvas.git
-cd franklin-canvas
+git clone https://github.com/wildparky/IPOS.git
+cd IPOS
 npm install
 BLOCKRUN_API_KEY=brk_... npm start   # → http://localhost:5173
 ```

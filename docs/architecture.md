@@ -1,6 +1,6 @@
 # 구조와 역할
 
-기존 브리지 구현: [fb6ff30](https://github.com/wildparky/franklin-canvas/commit/fb6ff30).
+기존 브리지 구현: [fb6ff30](https://github.com/wildparky/IPOS/commit/fb6ff30).
 저장소는 후속 SQLite 전환과 노드 단위 병합·3초 간격 변경 반영을 포함합니다.
 
 ```text

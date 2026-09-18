@@ -302,7 +302,7 @@ function AboutPane() {
       <h3 className="settings-subhead">{t('about_credits')}</h3>
       <p className="settings-foot-note">{t('about_credits_blurb')}</p>
       <div className="settings-links">
-        <a href="https://github.com/BlockRunAI/franklin-canvas" target="_blank" rel="noopener noreferrer">
+        <a href="https://github.com/wildparky/IPOS" target="_blank" rel="noopener noreferrer">
           Repository <ExternalLink size={12} aria-hidden />
         </a>
         <a href="https://github.com/BlockRunAI/Franklin" target="_blank" rel="noopener noreferrer">
