@@ -17,7 +17,7 @@ import {
   type OnConnectEnd,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { Sparkles } from 'lucide-react';
+import { Sparkles, Workflow, LibraryBig, LayoutGrid } from 'lucide-react';
 import { NODE_TYPES, NODE_CATALOG, CATEGORY_TITLES, IMAGE_MODELS, VIDEO_MODELS, MUSIC_MODELS, type GenNodeData, type NodeStatus, type NodeCatalogEntry } from '../canvas/nodes';
 import AgentPanel from '../canvas/AgentPanel';
 import AgentMascot from '../components/AgentMascot';
@@ -25,6 +25,7 @@ import { useAgentPrefs } from '../canvas/agentPrefsStore';
 import { EDGE_TYPES } from '../canvas/edges';
 import PromptBar from '../canvas/PromptBar';
 import MultiSelectionToolbar from '../canvas/MultiSelectionToolbar';
+import ProjectSwitcher from '../canvas/ProjectSwitcher';
 import { isInsideGroup } from '../canvas/groupBounds';
 import { calculateCodexOutputSize, type ImageRatio } from '../canvas/ImageSettingsPanel';
 import PromptLibrary from '../canvas/PromptLibrary';
@@ -36,7 +37,7 @@ import { usePrefsStore } from '../canvas/prefsStore';
 import { CanvasContext, type ImageEditOp } from '../canvas/CanvasContext';
 import { generate, bridgeMedia, stitchComparison, concatVideos, describeMedia, type StitchItem } from '../api/franklin';
 import type { CanvasAgentApi } from '../canvas/agentTools';
-import { getOrCreateCurrent, getProject, saveProjectCanvas, renameProject, canonicalMedia, PROJECT_GRAPH_CHANGED, PROJECT_SYNC_CHANGED, pollProject, projectSyncMessage, blockProject } from '../projects';
+import { getOrCreateCurrent, getProject, saveProjectCanvas, canonicalMedia, PROJECT_GRAPH_CHANGED, PROJECT_SYNC_CHANGED, pollProject, projectSyncMessage, blockProject } from '../projects';
 import { cleanGraph, graphPatch, mergeProject } from '../projectMerge';
 import { randomUUID } from '../uuid';
 import { useUiStore } from '../uiStore';
@@ -106,7 +107,7 @@ interface PendingConnect {
   side?: 'left' | 'right';
 }
 
-function CanvasInner() {
+function CanvasInner({ onOpenProject, onProjects }: { onOpenProject: () => void; onProjects: () => void }) {
   // Load the current project (created with the demo seed for first-time users).
   // CanvasView remounts on route change, so opening a project from the
   // Projects view lands us on that project's canvas. Lazy init runs once.
@@ -1246,17 +1247,8 @@ function CanvasInner() {
   return (
     <div className="canvas-host">
       <div className="canvas-toolbar">
-        <input
-          className="canvas-brand-input"
-          value={projectName}
-          onChange={(e) => {
-            setProjectName(e.target.value);
-            renameProject(projectIdRef.current, e.target.value);
-          }}
-          aria-label="Project name"
-          title="Rename project"
-          spellCheck={false}
-        />
+        <div className="ipos-canvas-heading"><button type="button" className="canvas-add-btn" onClick={onProjects} title="Projects"><LayoutGrid size={18} /><span>Projects</span></button><span className="ipos-heading-divider" aria-hidden /><Workflow size={18} /><span>Canvas</span></div>
+        <ProjectSwitcher name={projectName} currentId={project.id} onOpen={onOpenProject} onProjects={onProjects} />
         {syncMessage && <span role="status" title={syncMessage} style={{ fontSize: 11, maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: syncMessage.startsWith('Save paused') ? '#f99' : 'var(--text-muted)' }}>{syncMessage.startsWith('Save paused') ? 'Save paused' : syncMessage}</span>}
         <div className="canvas-toolbar-divider" aria-hidden />
         {/* Inline node-add bar — grouped by category (Generate / Utility /
@@ -1291,8 +1283,10 @@ function CanvasInner() {
               }),
             ];
           })}
+          <li><button type="button" className="canvas-add-btn" title="Collections" aria-label="Collections" onClick={() => setCollectionsOpen(true)}><LibraryBig size={18} strokeWidth={1.75} /></button></li>
         </ul>
         <span className="canvas-toolbar-spacer" />
+        <div className="ipos-assistant-frame">
         <button
           type="button"
           className="canvas-add-btn"
@@ -1316,6 +1310,7 @@ function CanvasInner() {
           <AgentMascot size={18} />
           <span>Agent</span>
         </button>
+        </div>
       </div>
 
       <CanvasContext.Provider value={{ openConnectMenu, runImageEdit, runImageSplit, runAnnotate, exportTimeline, groupSelectedNodes }}>
@@ -1371,6 +1366,11 @@ function CanvasInner() {
           maxZoom={Infinity}
         >
           {showDots && <Background variant={BackgroundVariant.Dots} gap={20} size={1.2} color={bgDotColor} />}
+          <div className="canvas-watermark" aria-hidden="true">
+            <svg viewBox="0 0 700 140" focusable="false">
+              <text x="350" y="110" textAnchor="middle" fontFamily="Arial, sans-serif" fontSize="120" fontWeight="900" textLength="690" lengthAdjust="spacingAndGlyphs"><tspan fill="#ff8c00">ON</tspan><tspan fill="#808080">TORY</tspan></text>
+            </svg>
+          </div>
           <MultiSelectionToolbar />
           {showMinimap && <MiniMap pannable zoomable maskColor={minimapMask} />}
         </ReactFlow>
@@ -1454,10 +1454,11 @@ function descriptionFor(type: string): string {
   }
 }
 
-export default function CanvasView() {
+export default function CanvasView({ onProjects }: { onProjects: () => void }) {
+  const [generation, setGeneration] = useState(0);
   return (
-    <ReactFlowProvider>
-      <CanvasInner />
+    <ReactFlowProvider key={generation}>
+      <CanvasInner onOpenProject={() => setGeneration(v => v + 1)} onProjects={onProjects} />
     </ReactFlowProvider>
   );
 }

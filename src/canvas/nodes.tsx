@@ -16,6 +16,7 @@ import { isInsideGroup } from './groupBounds';
 import { arrangeNodes } from './arrangeNodes';
 import { NodeTagToolbar } from './NodeTagControl';
 import ProductionStatusIcon from './ProductionStatusIcon';
+import EditableNodeTitle from './EditableNodeTitle';
 
 export type NodeStatus = 'idle' | 'running' | 'done' | 'error';
 
@@ -247,18 +248,6 @@ function CornerDelete({ id }: { id: string }) {
   );
 }
 
-function NodeHeader({ icon: Icon, title, status }: { icon: typeof Upload; title: string; status: NodeStatus }) {
-  return (
-    <div className="node-header">
-      <span className="node-title">
-        <Icon size={13} strokeWidth={1.75} aria-hidden />
-        <span>{title}</span>
-      </span>
-      <StatusPill status={status} />
-    </div>
-  );
-}
-
 // ── Upload (image-first card with title above + floating toolbar) ──
 export function UploadNode({ data, id }: NodeProps) {
   useRefreshHandles(id);
@@ -297,6 +286,7 @@ export function UploadNode({ data, id }: NodeProps) {
   };
 
   const [uploadLightbox, setUploadLightbox] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
 
   return (
     <div className="canvas-card-wrap">
@@ -310,26 +300,28 @@ export function UploadNode({ data, id }: NodeProps) {
         saveItem={d.imageUrl ? { kind: 'image', url: d.imageUrl, title: d.title } : null}
         onDownload={() => d.imageUrl && void downloadUrl(d.imageUrl, `${d.title || id}.png`)}
         onExpand={() => d.imageUrl && setUploadLightbox(true)}
+        onReplace={() => fileRef.current?.click()}
       >
         <div className="canvas-node node-upload card-mode" style={{ width: cardWidth }}>
           <CornerDelete id={id} />
           <div className="card-image" style={{ width: cardWidth, height: cardHeight }}>
+            <input
+              ref={fileRef}
+              type="file"
+              accept="image/*"
+              onChange={onFile}
+              style={{ display: 'none' }}
+              aria-label="Pick reference image"
+            />
             {d.imageUrl ? (
               <img src={d.imageUrl} alt="Uploaded reference" onLoad={onImageLoad} />
             ) : (
               <div className="card-placeholder">drop or upload</div>
             )}
-            <label className={`card-upload-overlay${d.imageUrl ? ' is-replace' : ''}`}>
-              <input
-                type="file"
-                accept="image/*"
-                onChange={onFile}
-                style={{ display: 'none' }}
-                aria-label="Pick reference image"
-              />
+            {!d.imageUrl && <label className="card-upload-overlay">
               <ReplaceIcon size={12} strokeWidth={2} aria-hidden />
-              <span>{d.imageUrl ? 'Replace' : 'Upload'}</span>
-            </label>
+              <span>Upload</span>
+            </label>}
           </div>
         </div>
       </NodeFrame>
@@ -399,6 +391,7 @@ export function ImageGenNode({ data, id }: NodeProps) {
         onDownload={() => d.resultUrl && void downloadUrl(d.resultUrl, `${d.title || id}.png`)}
         onExpand={() => d.resultUrl && setLightboxSrc(d.resultUrl as string)}
         onMore={() => setMenuOpen((v) => !v)}
+        onReplace={onReplaceClick}
         toolbarExtra={
           menuOpen ? (
             <NodeActionMenu
@@ -441,9 +434,6 @@ export function ImageGenNode({ data, id }: NodeProps) {
                   errorMessage: 'Image failed to load — try again',
                 })}
               />
-              <button className="media-replace" type="button" aria-label="Replace" onClick={(e) => { e.stopPropagation(); onReplaceClick(); }}>
-                <ReplaceIcon size={14} aria-hidden /> Replace
-              </button>
             </>
           ) : d.status === 'error' ? (
             <div className="media-placeholder media-error">
@@ -767,7 +757,7 @@ export function MusicGenNode({ data, id }: NodeProps) {
 // ── Text / LLM ──
 export function TextNode({ data, id }: NodeProps) {
   useRefreshHandles(id);
-  const d = data as TextNodeData;
+  const d = data as TextNodeData & { title?: string };
   const { updateNodeData } = useReactFlow();
 
   return (
@@ -776,7 +766,7 @@ export function TextNode({ data, id }: NodeProps) {
       <NodeTagToolbar id={id} />
       <CornerDelete id={id} />
       <Handle type="target" position={Position.Left} id={`${id}-in`} />
-      <NodeHeader icon={Type} title="Text / LLM" status={d.status ?? 'idle'} />
+      <div className="node-header"><span className="node-title"><Type size={13} strokeWidth={1.75} aria-hidden /><EditableNodeTitle id={id} value={d.title} fallback="Text / LLM" /></span><StatusPill status={d.status ?? 'idle'} /></div>
       <ProductionStatusIcon id={id} />
       <div className="node-body">
         <ModelDropdown
@@ -816,8 +806,6 @@ export function GroupNode({ data, id, selected }: NodeProps) {
   const assetType = d.assetType !== undefined ? d.assetType : (d.tags ?? []).find(t => assetTypes.includes(t));
   const statusColor = status ? statuses[status] : undefined;
   const { updateNodeData, setNodes, deleteElements, getEdges } = useReactFlow();
-  const [editing, setEditing] = useState(false);
-  const [name, setName] = useState('');
   const [tagOpen, setTagOpen] = useState(false);
   const tagRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -831,10 +819,6 @@ export function GroupNode({ data, id, selected }: NodeProps) {
     document.addEventListener('pointerdown', close);
     return () => document.removeEventListener('pointerdown', close);
   }, [tagOpen]);
-  const commitName = () => {
-    updateNodeData(id, { label: name.trim() || 'Group' });
-    setEditing(false);
-  };
   const autoSort = () => setNodes(nodes => {
     const group = nodes.find(n => n.id === id);
     if (!group) return nodes;
@@ -894,10 +878,7 @@ export function GroupNode({ data, id, selected }: NodeProps) {
       <div className="group-label">
         <ProductionStatusIcon id={id} />
         <SquareDashed size={11} strokeWidth={1.5} aria-hidden />
-        {editing ? <input className="nodrag nopan" aria-label="Group name" autoFocus value={name}
-          onChange={e => setName(e.target.value)} onBlur={commitName}
-          onKeyDown={e => { e.stopPropagation(); if (e.key === 'Enter') commitName(); if (e.key === 'Escape') setEditing(false); }} />
-          : <span onDoubleClick={e => { e.stopPropagation(); setName(d.label ?? 'Group'); setEditing(true); }} title="Double-click to rename">{d.label ?? 'Group'}</span>}
+        <EditableNodeTitle id={id} value={d.label} fallback="Group" dataKey="label" className="nodrag nopan" />
         {status && <span className="group-tag-badge" style={{ color: statusColor, borderColor: statusColor }}>{status}</span>}
         {assetType && <span className="group-tag-badge">{assetType}</span>}
       </div>
@@ -1190,7 +1171,7 @@ export function TimelineNode({ data, id }: NodeProps) {
         <div className="timeline-head">
           <ProductionStatusIcon id={id} />
           <Clapperboard size={13} strokeWidth={1.75} aria-hidden />
-          <span>{d.title || 'Timeline'}</span>
+          <EditableNodeTitle id={id} value={d.title} fallback="Timeline" />
           <span className="timeline-head-spacer" />
           <span className="timeline-head-total">{formatMmSs(total)} / {formatMmSs(trackSeconds)}</span>
           <div className="timeline-zoom nodrag" role="group" aria-label="Timeline zoom">

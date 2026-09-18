@@ -4,7 +4,7 @@
 // the canvas (which loads it on mount).
 
 import { useEffect, useState } from 'react';
-import { Plus, Trash2, Pencil, Image as ImageIcon, Film, Music, LayoutGrid, ArrowLeft } from 'lucide-react';
+import { Plus, Trash2, Pencil, Image as ImageIcon, Film, Music, LayoutGrid } from 'lucide-react';
 import {
   listProjects, createProject, deleteProject, renameProject, setCurrentId,
   type ProjectSummary, hydrateFromFiles, loadProject, PROJECTS_CHANGED,
@@ -88,15 +88,6 @@ export default function ProjectsView({ onOpenCanvas }: Props) {
   return (
     <div className="projects-host">
       <header className="projects-head">
-        <button
-          type="button"
-          className="projects-back"
-          onClick={onOpenCanvas}
-          aria-label="Back to canvas"
-          title="Back to canvas (Esc)"
-        >
-          <ArrowLeft size={16} aria-hidden /> Back to canvas
-        </button>
         <div className="projects-head-text">
           <h1>Projects</h1>
           <p>Each project is its own canvas. Open one to keep working, or start fresh.</p>

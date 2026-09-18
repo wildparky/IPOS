@@ -1466,6 +1466,19 @@ button:active:not(:disabled) { transform: scale(0.97); }
   transition: background-color 0.14s ease, border-color 0.14s ease;
 }
 .canvas-brand-input:hover { background: var(--bg-hover); }
+.project-switcher { position: relative; flex-shrink: 0; }
+.project-switcher-trigger { display: flex; align-items: center; justify-content: space-between; gap: 8px; cursor: pointer; }
+.project-switcher-trigger span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.project-switcher-menu { position: absolute; top: calc(100% + 10px); left: 0; width: 340px; max-width: 85vw; z-index: 100; background: var(--bg-card); border: 1px solid var(--border); border-radius: 14px; padding: 12px; box-shadow: 0 12px 40px #0008; }
+.project-switcher-menu header { display: flex; gap: 12px; align-items: center; padding-bottom: 10px; }
+.project-switcher-menu header strong { font-size: 12px; }
+.project-switcher-menu input { min-width: 0; width: 100%; padding: 7px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--fg); }
+.project-switcher-list { max-height: 320px; overflow-y: auto; }
+.project-switcher-list button, .project-switcher-new { display: flex; width: 100%; align-items: center; gap: 12px; padding: 9px; border: 0; background: transparent; color: var(--fg); text-align: left; cursor: pointer; border-radius: 8px; }
+.project-switcher-list button:hover, .project-switcher-list button[aria-current], .project-switcher-new:hover { background: var(--bg-hover); }
+.project-switcher-list img { width: 56px; height: 40px; object-fit: cover; border-radius: 5px; }
+.project-switcher-list span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.project-switcher-new { margin-top: 10px; border-top: 1px solid var(--border); color: var(--accent); }
 .canvas-brand-input:focus { background: var(--bg-card); border-color: var(--accent-ring); }
 .canvas-toolbar-divider { width: 1px; height: 18px; background: rgba(255,255,255,0.10); margin: 0 2px; }
 .canvas-toolbar-spacer { flex: 1; }

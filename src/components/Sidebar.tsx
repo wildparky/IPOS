@@ -1,99 +1,11 @@
-// Primary left navigation rail. Brand (Franklin Canvas) at top, Canvas /
-// Projects nav in the middle, Wallet + Settings in the footer (both open the
-// SettingsDialog on the relevant pane). Collapsible via the chevron button —
-// width animates between expanded (240px) and collapsed (56px); labels fade.
-
-import {
-  Workflow, LayoutGrid, Settings,
-  LibraryBig, Columns3, PanelLeftClose, PanelLeftOpen,
-} from 'lucide-react';
+import { LayoutGrid, LibraryBig, Workflow } from 'lucide-react';
 import type { Route } from '../types';
-import { useT, type StringKey } from '../i18n';
 import { useUiStore } from '../uiStore';
-
-type SettingsSection = 'wallet' | 'models' | 'canvas' | 'about';
-
-interface NavItem { id: Route; labelKey: StringKey; Icon: typeof Workflow; }
-const ITEMS: NavItem[] = [
-  { id: 'projects',   labelKey: 'sidebar_projects',   Icon: LayoutGrid },
-  { id: 'canvas',     labelKey: 'sidebar_canvas',     Icon: Workflow },
-  { id: 'comparison', labelKey: 'sidebar_comparison', Icon: Columns3 },
-];
-
-interface Props {
-  route: Route;
-  collapsed?: boolean;
-  onNavigate: (r: Route) => void;
-  onToggleCollapse?: () => void;
-  onOpenSettings?: (section?: SettingsSection) => void;
-}
-
-export default function Sidebar({ route, collapsed = false, onNavigate, onToggleCollapse, onOpenSettings }: Props) {
-  const t = useT();
-  const openCollections = useUiStore((s) => s.setCollectionsOpen);
-  return (
-    <nav
-      className={`sidebar ${collapsed ? 'is-collapsed' : ''}`}
-      aria-label="Primary"
-    >
-      <div className="sidebar-brand">
-        <span className="sidebar-brand-mark">
-          <img src="/mofac-logo.svg" className="brand-logo brand-logo-mofac" alt="MOFAC" />
-          <span aria-label={t('sidebar_brand')}>IP<span className="sidebar-brand-os">OS</span></span>
-        </span>
-        {onToggleCollapse && (
-          <button
-            type="button"
-            className="sidebar-collapse"
-            onClick={onToggleCollapse}
-            aria-label={collapsed ? t('sidebar_expand') : t('sidebar_collapse')}
-            aria-pressed={collapsed}
-            title={collapsed ? t('sidebar_expand') : t('sidebar_collapse')}
-          >
-            {collapsed ? <PanelLeftOpen size={16} aria-hidden /> : <PanelLeftClose size={16} aria-hidden />}
-          </button>
-        )}
-      </div>
-      <ul className="sidebar-nav">
-        {ITEMS.map(({ id, labelKey, Icon }) => {
-          const label = t(labelKey);
-          return (
-            <li key={id}>
-              <button
-                className={`nav-item ${route === id ? 'active' : ''}`}
-                onClick={() => onNavigate(id)}
-                aria-current={route === id ? 'page' : undefined}
-                title={collapsed ? label : undefined}
-              >
-                <Icon size={16} strokeWidth={1.75} aria-hidden />
-                <span>{label}</span>
-              </button>
-            </li>
-          );
-        })}
-        <li>
-          <button
-            className="nav-item"
-            onClick={() => { onNavigate('canvas'); openCollections(true); }}
-            title={collapsed ? t('sidebar_library') : undefined}
-          >
-            <LibraryBig size={16} strokeWidth={1.75} aria-hidden />
-            <span>{t('sidebar_library')}</span>
-          </button>
-        </li>
-      </ul>
-      <div className="sidebar-footer">
-        <button
-          className="nav-item"
-          onClick={() => onOpenSettings?.('canvas')}
-          aria-label={t('sidebar_settings')}
-          title={collapsed ? t('sidebar_settings') : undefined}
-        >
-          <Settings size={16} strokeWidth={1.75} aria-hidden />
-          <span>{t('sidebar_settings')}</span>
-        </button>
-        <div className="version" aria-hidden>IPOS v0.2.0</div>
-      </div>
-    </nav>
-  );
+export default function Sidebar({ route, onNavigate }: { route: Route; onNavigate: (route: Route) => void }) {
+  const openCollections = useUiStore(s => s.setCollectionsOpen);
+  return <nav className="ipos-nav-rail" aria-label="Primary">
+    <button title="Projects" aria-label="Projects" aria-current={route === 'projects' ? 'page' : undefined} onClick={() => onNavigate('projects')}><LayoutGrid size={18} /></button>
+    <button title="Back to canvas (Esc)" aria-label="Back to canvas" onClick={() => onNavigate('canvas')}><Workflow size={18} /></button>
+    <button title="Collections" aria-label="Collections" onClick={() => { onNavigate('canvas'); openCollections(true); }}><LibraryBig size={18} /></button>
+  </nav>;
 }

@@ -9,7 +9,7 @@
 import { useReactFlow, useStore, NodeToolbar, Position } from '@xyflow/react';
 import {
   MoreHorizontal,
-  FolderPlus, Download, Maximize2, CheckCircle2, Trash2, Group,
+  FolderPlus, Download, Maximize2, CheckCircle2, Trash2, Group, Upload,
   type LucideIcon,
 } from 'lucide-react';
 import { createElement, useState, type ReactNode } from 'react';
@@ -19,6 +19,7 @@ import { useCollectionsStore } from '../collectionsStore';
 import { useCanvasCtx } from './CanvasContext';
 import NodeTagControl from './NodeTagControl';
 import ProductionStatusIcon from './ProductionStatusIcon';
+import EditableNodeTitle from './EditableNodeTitle';
 
 export interface ToolbarItem {
   id: string;
@@ -68,6 +69,7 @@ interface Props {
   /** Toolbar callbacks for the default right group. */
   onDownload?: () => void;
   onExpand?: () => void;
+  onReplace?: () => void;
   /** Whether a result exists — controls Download/Expand enabled state. */
   hasResult?: boolean;
   /** The result to save into a collection (image/video/audio + metadata).
@@ -97,17 +99,19 @@ export default function NodeFrame({
   onMore,
   onDownload,
   onExpand,
+  onReplace,
   hasResult,
   saveItem,
   toolbarExtra,
   children,
 }: Props) {
-  const { updateNodeData, deleteElements } = useReactFlow();
+  const { deleteElements } = useReactFlow();
   const onDelete = () => { void deleteElements({ nodes: [{ id }] }); };
   const [saveOpen, setSaveOpen] = useState(false);
   const saved = useCollectionsStore((s) => (saveItem ? s.items.some((it) => it.url === saveItem.url) : false));
   const { groupSelectedNodes } = useCanvasCtx();
-  const left = [...(toolbarLeft ?? buildDefaultLeft(onMore)),
+  const replaceItems: ToolbarItem[] = onReplace ? [{ id: 'replace', iconComponent: Upload, label: 'Replace image', onClick: onReplace }] : [];
+  const left: ToolbarItem[] = [...replaceItems, ...(toolbarLeft ?? buildDefaultLeft(onMore)),
     { id: 'group', iconComponent: Group, label: 'Group selected nodes', onClick: () => groupSelectedNodes(id) }];
   const right = toolbarRight ?? buildDefaultRight({
     onDelete, onDownload, onExpand, hasResult,
@@ -136,14 +140,7 @@ export default function NodeFrame({
             <Icon size={11} strokeWidth={1.75} aria-hidden />
           </span>
         )}
-        <input
-          className="node-title-input"
-          value={title ?? ''}
-          placeholder={placeholder}
-          onChange={(e) => updateNodeData(id, { title: e.target.value })}
-          onClick={(e) => e.stopPropagation()}
-          aria-label="Node title"
-        />
+        <EditableNodeTitle id={id} value={title} fallback={placeholder} className="node-title-input" />
         <ProductionStatusIcon id={id} />
         {status === 'done' && (
           <CheckCircle2 size={13} className="node-title-check" aria-hidden />

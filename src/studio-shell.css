@@ -1,0 +1,81 @@
+.ipos-shell { position: relative; --studio-header-height: 60px; }
+.ipos-shell .projects-head-text { display: flex; align-items: baseline; flex-wrap: wrap; column-gap: 16px; row-gap: 4px; }
+.ipos-shell .projects-head-text h1 { margin: 0; flex-shrink: 0; }
+.ipos-shell .projects-host { padding-top: 16px; animation: none; transform: none; }
+.ipos-shell .projects-head { position: fixed; top: 8px; left: 330px; right: 32px; min-height: 48px; align-items: center; margin: 0; z-index: 30; }
+.ipos-shell .projects-new { flex-shrink: 0; }
+@media (max-width: 1000px) {
+  .ipos-shell .projects-head-text p { display: none; }
+}
+@media (max-width: 600px) {
+  .ipos-shell .projects-head { position: static; margin-bottom: 16px; }
+}
+.canvas-watermark { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; pointer-events: none; user-select: none; z-index: 0; opacity: 0.1; }
+.canvas-watermark svg { display: block; width: 70%; height: auto; overflow: visible; }
+.ipos-brand-header { position: absolute; left: 16px; top: 0; height: 60px; display: flex; align-items: center; gap: 10px; z-index: 40; }
+.ipos-brand-header img { width: 90px; height: 34px; object-fit: contain; }
+.ipos-brand-text { display: inline-flex; align-items: center; gap: 10px; }
+.ipos-brand-text .ipos-version { align-self: flex-end; padding-bottom: 6px; }
+.ipos-brand-header .ipos-symbol { width: 40.32px; height: 40.32px; object-fit: contain; align-self: center; filter: brightness(0) saturate(100%) invert(55%) sepia(98%) saturate(2200%) hue-rotate(359deg) brightness(101%) contrast(105%); }
+.ipos-brand-header::after { content: ''; width: 1px; height: 28px; background: #808080; flex-shrink: 0; }
+.ipos-wordmark { font-size: 22.5px; font-weight: 200; white-space: nowrap; }
+.ipos-wordmark > span { color: #a3e635; }
+.ipos-version { color: var(--fg-dim); font-size: 10px; white-space: nowrap; }
+.ipos-brand-header button, .ipos-nav-rail button { display: flex; align-items: center; justify-content: center; border: 0; border-radius: 8px; background: transparent; color: var(--fg-dim); cursor: pointer; width: 34px; height: 34px; }
+.ipos-brand-header button:hover, .ipos-nav-rail button:hover { background: var(--bg-hover); color: var(--fg); }
+.ipos-nav-rail { position: absolute; left: 9px; top: 76px; display: flex; flex-direction: column; gap: 6px; z-index: 30; }
+.ipos-nav-rail button[aria-current] { color: var(--accent); background: var(--bg-hover); }
+.ipos-shell .canvas-toolbar { height: var(--studio-header-height); box-sizing: border-box; flex-shrink: 0; padding: 8px 16px 8px 320px; gap: 10px; }
+.ipos-shell .canvas-toolbar > .canvas-toolbar-divider { display: none; }
+.ipos-canvas-heading { position: absolute; left: 50%; top: 0; height: 60px; transform: translateX(-50%); display: flex; align-items: center; gap: 8px; pointer-events: none; font-size: 14px; }
+.ipos-shell .canvas-add-row { position: absolute; top: calc(50% + var(--studio-header-height) / 2); transform: translateY(-50%); left: 9px; flex-direction: column; gap: 6px; z-index: 30; max-height: calc(100% - var(--studio-header-height) - 24px); overflow-y: auto; }
+.ipos-shell .canvas-add-row .canvas-add-btn { width: 34px; height: 34px; padding: 0; justify-content: center; }
+.ipos-shell .canvas-add-row .canvas-add-btn span { display: none; }
+.ipos-shell .canvas-add-group-sep { width: 24px; height: 1px; flex-shrink: 0; margin: 3px auto; background: var(--border); filter: brightness(1.2); }
+.ipos-shell .canvas-add-row .canvas-add-btn svg, .ipos-brand-header button svg, .ipos-nav-rail button svg { width: 18px; height: 18px; flex-shrink: 0; color: var(--fg-dim); }
+.ipos-shell .canvas-add-row .canvas-add-btn:hover svg, .ipos-shell .canvas-add-row .canvas-add-btn:focus-visible svg, .ipos-brand-header button:hover svg, .ipos-nav-rail button:hover svg { color: #a3e635; }
+.ipos-shell .canvas-body { margin-left: 54px; }
+.ipos-shell:not(.route-canvas) .main { padding: 60px 0 0 54px; }
+.ipos-brand-header, .ipos-shell .canvas-add-row, .ipos-canvas-heading, .ipos-assistant-frame { background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 16px; box-shadow: 0 4px 16px #0003; }
+.ipos-brand-header { top: 8px; height: 48px; padding: 0 8px; left: 8px; }
+.ipos-brand-header::after { display: none; }
+.ipos-shell .canvas-toolbar { background: transparent; border-bottom: 0; height: 72px; padding-left: 330px; }
+.ipos-shell { --studio-header-height: 72px; }
+.ipos-shell .canvas-add-row { padding: 8px 5px; }
+.ipos-shell .canvas-body { margin-left: 0; }
+.ipos-shell .canvas-host { background: transparent; }
+.ipos-shell .canvas-toolbar { position: absolute; top: 0; left: 0; right: 0; z-index: 30; background: transparent; border: 0; box-shadow: none; pointer-events: none; }
+.ipos-shell .canvas-toolbar > :not(.canvas-toolbar-spacer):not(.canvas-toolbar-divider) { pointer-events: auto; }
+.ipos-shell .canvas-add-row { position: fixed; top: calc(50vh + var(--studio-header-height) / 2); max-height: calc(100vh - var(--studio-header-height) - 24px); }
+.ipos-canvas-heading { top: 8px; height: 48px; padding: 0 12px 0 4px; pointer-events: auto; box-sizing: border-box; }
+.ipos-heading-divider { width: 1px; height: 20px; background: #808080; }
+.ipos-assistant-frame { display: flex; align-items: center; padding: 6px; gap: 4px; }
+.ipos-shell .project-switcher-trigger { background: transparent; border: 1px solid var(--border); }
+.ipos-shell .project-switcher-trigger:hover, .ipos-shell .project-switcher-trigger:focus-visible { border-color: #a3e635; }
+.ipos-shell .project-switcher-trigger { position: relative; justify-content: center; padding-left: 26px; padding-right: 26px; }
+.ipos-shell .project-switcher-trigger > span { width: 100%; text-align: center; color: #ff8c00; font-size: 1.2em; }
+.mofac-home-link { display: inline-flex; align-items: center; flex-shrink: 0; }
+.ipos-brand-header .ipos-symbol { transform: translateX(4px); }
+.ipos-shell .project-switcher-trigger > svg { position: absolute; right: 8px; }
+@media (min-width: 1301px) {
+  .ipos-shell .canvas-toolbar > .project-switcher,
+  .ipos-shell .canvas-toolbar > [role="status"] { position: relative; top: -4px; }
+}
+.project-switcher-heading { border: 0; background: transparent; color: var(--fg); padding: 0; font-size: 12px; font-weight: 700; cursor: pointer; }
+.project-switcher-heading:hover, .project-switcher-heading:focus-visible { color: #a3e635; }
+@media (max-width: 1300px) {
+  .ipos-shell { --studio-header-height: 104px; }
+  .ipos-shell .canvas-toolbar { height: var(--studio-header-height); padding: 60px 12px 4px 60px; }
+  .ipos-canvas-heading { left: auto; right: 12px; transform: none; }
+  .ipos-nav-rail { top: 116px; }
+}
+@media (max-width: 560px) {
+  .ipos-brand-header { left: 8px; gap: 5px; }
+  .ipos-brand-header img { width: 60px; }
+  .ipos-wordmark { font-size: 18px; }
+  .ipos-canvas-heading { left: auto; right: 12px; transform: none; }
+  .ipos-shell .canvas-toolbar { gap: 4px; padding-left: 54px; }
+  .ipos-shell .project-switcher-trigger { width: 105px; min-width: 60px; }
+  .ipos-shell .canvas-toolbar > .canvas-add-btn { padding: 6px; }
+  .ipos-shell .canvas-toolbar > [role="status"] { max-width: 65px !important; }
+}
