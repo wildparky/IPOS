@@ -1,24 +1,31 @@
-# Changelog
+# 변경 이력
 
 ## 2026-09-18 — fb6ff30
 
-Commit: [Codex / TopView bridges and server-backed Canvas](https://github.com/wildparky/franklin-canvas/commit/fb6ff30)
+커밋: [Codex·TopView 브리지와 서버 기반 Canvas](https://github.com/wildparky/franklin-canvas/commit/fb6ff30)
 
-- Added Codex delegation and TopView MCP video execution through the official host.
-- Added Seedance model/mode controls, provider progress, reference upload and local result import.
-- Added multi-image file drop, original-ratio photo nodes and original TopView reference transfer.
-- Moved canonical projects to revision-checked backend files; preserved browser recovery and backups.
-- Externalized inline media to content-addressed project files without deleting source bytes.
-- Added lightweight project summaries, on-demand graph loading and read-only media inventory.
-- Added UUID fallback for LAN HTTP and configured the development HTTPS hostname allowlist.
-- Preserved existing BlockRun paths and Canvas/Media Agent operations.
+- 공식 호스트 기반 Codex 위임과 TopView MCP 영상 실행 경로 추가
+- Seedance 모델·모드 설정, 제공자 진행률, 참조 업로드와 결과 파일 가져오기 추가
+- 다중 이미지 드롭, 원본 비율 photo 노드, TopView 원본 참조 전송 추가
+- 프로젝트 기준 저장소를 버전 검사 방식의 백엔드 파일로 전환하고 브라우저 복구·백업 유지
+- 원본 바이트를 삭제하지 않고 JSON 내부 미디어를 해시 기반 프로젝트 파일로 분리
+- 경량 프로젝트 요약, 선택한 캔버스 상세 조회, 조회 전용 미디어 사용량 검사 추가
+- 내부망 HTTP용 UUID 대체 구현과 개발용 HTTPS 호스트 허용 설정 추가
+- 기존 BlockRun 경로와 Canvas·Media Agent 기능 유지
 
-Validation: build passed (large-chunk warning); 29 tests passed, 1 Windows symlink test skipped.
-Known limits: no realtime collaboration/automatic merge, no automatic media deletion,
-no built-in multi-user authentication; some state remains browser-local.
-Tailscale Serve setup is host configuration, not deployed by this commit.
+검증: 빌드 성공(큰 번들 경고 유지), 테스트 29개 통과,
+Windows 심볼릭 링크 권한 제한으로 1개 건너뜀.
 
-## Documentation follow-up
+제한사항: 실시간 협업·자동 병합·미디어 자동 삭제·다중 사용자 인증은 없습니다.
+일부 상태는 브라우저에만 저장됩니다.
+Tailscale Serve는 서버 OS 설정이며 이 커밋만으로 배포되지 않습니다.
 
-Added the docs directory and README navigation describing setup, architecture,
-generation, storage, remote access and troubleshooting. No runtime behavior change.
+## 문서 후속 작업 — c679f3b
+
+설치, 구조, 생성, 저장, 원격 접속, 문제 해결 문서를 docs에 추가하고 README에서 연결했습니다.
+실행 동작에는 변경이 없습니다.
+
+## 한국어 문서 정리
+
+변경 이력, 브리지·저장소 상세 문서와 README 문서 안내를 한국어로 통일했습니다.
+명령어·API·파일명은 유지했습니다.

@@ -26,22 +26,21 @@ An infinite canvas for **image, video and music**, with side-by-side **model com
 in-canvas editing, a 848-case prompt library, timeline, and three themes. Generations use BlockRun account credits or pay per call from a local Solana/Base wallet
 (built on the [Franklin core](https://github.com/BlockRunAI/Franklin) SDK).
 
-## Fork documentation (Codex / TopView / server storage)
+## 한국어 문서 — Codex / TopView / 서버 저장소
 
-This fork adds Codex OAuth delegation, TopView MCP video generation and backend-authoritative
-project/media storage. The upstream BlockRun functionality described below remains available;
-its credentials and billing are separate from the new provider paths.
+이 포크는 Codex OAuth 위임, TopView MCP 영상 생성, 서버 기준 프로젝트·미디어 저장 기능을 추가합니다.
+아래에서 소개하는 원본 BlockRun 기능도 유지하며, 인증과 과금은 새 제공자 경로와 별개입니다.
 
-- [Architecture and current limitations](docs/architecture.md)
-- [Installation, OAuth and local execution](docs/setup.md)
-- [Image/video generation and reference modes](docs/media-generation.md)
-- [Project storage, conflicts and recovery](docs/storage.md)
-- [LAN / Tailscale HTTPS and security](docs/remote-access.md)
-- [Troubleshooting and verification scope](docs/troubleshooting.md)
-- [Change history](CHANGELOG.md)
+- [구조와 현재 제한사항](docs/architecture.md)
+- [설치·OAuth·로컬 실행](docs/setup.md)
+- [이미지·영상 생성과 참조 모드](docs/media-generation.md)
+- [프로젝트 저장·충돌·복구](docs/storage.md)
+- [내부망·Tailscale HTTPS·보안](docs/remote-access.md)
+- [문제 해결과 검증 범위](docs/troubleshooting.md)
+- [변경 이력](CHANGELOG.md)
 
-This is not a realtime collaborative editor or an authenticated multi-user service.
-Do not expose its agent/file/command endpoints directly to the public internet.
+현재는 실시간 공동 편집기나 사용자 인증을 갖춘 다중 사용자 서비스가 아닙니다.
+Agent·파일·명령 실행 API를 인터넷에 직접 공개하지 마세요.
 
 ## Demos
 

@@ -1,38 +1,53 @@
-# Project media storage
+# 프로젝트 미디어 저장 구조
 
-Canonical project graphs remain at `~/.franklin/projects/<id>.json` for compatibility.
-Media is content-addressed under `<id>/media/uploads/` and `<id>/media/generated/`.
-Node IDs, edges, prompts and settings are unchanged. Recognized URL fields are
-rewritten to `/api/project-media/<id>/<bucket>/<sha256>.<extension>` when saved.
-Original bytes are preserved, duplicates within a bucket reused and verified.
+호환성을 위해 기준 프로젝트 데이터는 `~/.franklin/projects/<id>.json`에 유지합니다.
+미디어는 파일 내용의 해시를 이름으로 사용하여
+`<id>/media/uploads/`와 `<id>/media/generated/`에 저장합니다.
+노드 ID·연결·프롬프트·설정은 유지하며, 지원되는 URL 필드는 저장 시
+`/api/project-media/<id>/<bucket>/<sha256>.<extension>`으로 교체합니다.
+원본 바이트를 보존하고, 같은 저장 구역 내 중복 파일은 재사용하고 검증합니다.
 
-The browser applies server-returned URL replacements to live nodes without
-replacing newer graph edits. Subsequent queued saves use these canonical URLs.
-Initial uploads still travel as data URLs once; subsequent graph saves do not.
+브라우저는 서버가 반환한 URL을 현재 노드에 반영하되, 그 사이 발생한 최신 캔버스 수정은 유지합니다.
+대기 중인 다음 저장도 교체된 URL을 사용합니다.
+최초 업로드는 data URL로 한 번 전송하지만 이후에는 파일 URL을 사용합니다.
 
-Codex/TopView input materialization, describe_media and video stitching/film
-assembly resolve the new URLs locally. HTTP serving supports byte ranges.
-Legacy `/api/generated/` URLs remain usable; generation output is copied into
-the project on its next save. Node/project deletion never removes media, so
-other nodes, collections, timelines and backups retain their references.
+Codex·TopView 참조 입력, `describe_media`, 영상 이어붙이기와 영화 조립은
+새 URL을 로컬 파일로 해석합니다. HTTP 파일 제공은 바이트 범위 요청을 지원합니다.
+기존 `/api/generated/` URL도 계속 사용할 수 있으며,
+생성 결과는 다음 프로젝트 저장 시 프로젝트 미디어로 복사됩니다.
+노드나 프로젝트를 삭제해도 미디어 파일은 삭제하지 않으므로
+다른 노드·컬렉션·타임라인·백업의 참조를 보존합니다.
 
-`ProjectStorage.migrateMedia()` explicitly migrates existing JSON with backups
-and revision increments. Stop the backend during an offline migration and
-reload browser clients afterward. No migration runs implicitly on GET.
-Backups live in `.backups`; shared generated source files are not removed.
+## 기존 데이터 이전
 
-Projects UI polls `/api/projects?summary=1` (no nodes/edges) and loads the selected
-graph from `/api/projects/<id>`. The legacy full-list API remains compatible.
-Summary polling does not change an already loaded canvas's revision token.
+`ProjectStorage.migrateMedia()`는 JSON 백업 후 미디어를 분리하고 revision을 증가시킵니다.
+오프라인 이전 중에는 백엔드를 중지하고, 완료 후 브라우저를 새로고침하세요.
+GET 요청만으로 이전을 자동 실행하지 않습니다.
+백업은 `.backups`에 남기고, 공용 생성 원본 파일은 삭제하지 않습니다.
 
-Projects includes a read-only media inventory at `/api/media/audit`. It checks
-project/timeline URLs, backup URLs and inline backup content hashes, plus collection
-URLs supplied by the current browser. Files younger than 30 days are not candidates.
-Other browsers' unsynced references remain unknown: candidates are not confirmed
-safe to delete. There is no delete/move/cleanup endpoint. Temporary task directories
-and backup JSON sizes are excluded from the inventory. JSON reference read failures
-make all otherwise-unreferenced old files unverified, not cleanup candidates.
+## 목록 조회
 
-Current limitations: no orphan-media garbage collection; local-only legacy browser recovery is explicit.
-Moving a project between machines requires its JSON and media directory plus
-any cross-project or external references, not just the JSON file.
+Projects 화면은 노드·연결을 제외한 `/api/projects?summary=1`을 주기적으로 조회하고,
+선택한 캔버스는 `/api/projects/<id>`로 가져옵니다.
+기존 전체 목록 API도 호환성을 위해 유지합니다.
+요약 조회는 이미 열린 캔버스의 저장 버전 토큰을 변경하지 않습니다.
+
+## 미디어 사용량과 정리 후보
+
+Projects의 `/api/media/audit`는 조회 전용입니다.
+프로젝트·타임라인 URL, 백업 URL과 백업에 포함된 원본 데이터 해시,
+현재 브라우저가 전달한 컬렉션 URL을 확인합니다.
+수정 후 30일이 지나지 않은 파일은 후보에서 제외합니다.
+
+다른 브라우저의 동기화되지 않은 참조는 확인할 수 없으므로
+후보가 곧 안전하게 삭제 가능한 파일이라는 뜻은 아닙니다.
+삭제·이동·정리 API는 없습니다.
+임시 작업 폴더와 백업 JSON 용량은 사용량 집계에서 제외됩니다.
+참조 JSON을 읽지 못하면 미참조로 보이는 오래된 파일도 정리 후보가 아니라
+미검증 상태로 분류합니다.
+
+## 제한사항
+
+미사용 미디어 자동 삭제는 없으며, 기존 브라우저 전용 데이터 복구는 명시적으로 실행해야 합니다.
+다른 PC로 옮길 때는 프로젝트 JSON뿐 아니라 미디어 디렉터리와
+다른 프로젝트 또는 외부 파일에 대한 참조도 함께 고려해야 합니다.
