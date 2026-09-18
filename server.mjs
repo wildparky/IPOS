@@ -34,6 +34,11 @@ import {
 } from '@blockrun/llm';
 import { runAgentChat, runBackendTool, describeMedia, summarizeConversation, listMemories, deleteMemory, CANVAS_TOOL_NAMES } from './agent-tools.mjs';
 import { billingContext, isAccountMode, ACCOUNT_PORTAL, ACCOUNT_KEYS_URL, ACCOUNT_CREDITS_URL } from './account-auth.mjs';
+import { codexGenerateImage, codexEditImage, codexStatus } from './codex-agent-bridge.mjs';
+import { topviewGenerateVideo, topviewStatus } from './topview-video-bridge.mjs';
+import { createProjectStorage, ProjectStorageError } from './project-storage.mjs';
+import { resolveProjectMediaUrl } from './project-media.mjs';
+import { auditMedia } from './media-audit.mjs';
 
 const PORT = Number(process.env.PORT || 3100);
 const apiUrl = process.env.BLOCKRUN_API_URL || undefined;
@@ -42,10 +47,25 @@ const GATEWAY = process.env.BLOCKRUN_API_URL || 'https://blockrun.ai/api';
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const JOBS_DIR = path.join(os.homedir(), '.franklin', 'web-jobs');
 fs.mkdirSync(JOBS_DIR, { recursive: true });
+// Bridge jobs are kept server-side; the browser receives only safe task state.
+const MEDIA_JOBS = new Map();
+function mediaJobSnapshot(job) {
+  return {
+    ok: true, jobId: job.jobId, provider: job.provider, kind: job.kind, model: job.model,
+    status: job.status, progress: Number.isFinite(job.progress) ? job.progress : null,
+    etaSeconds: Number.isFinite(job.etaSeconds) ? job.etaSeconds : null,
+    task_id: job.task_id || null,
+    elapsedS: Math.max(0, Math.floor((Date.now() - job.startedAt) / 1000)),
+    ...(job.resultUrl ? { resultUrl: job.resultUrl } : {}),
+    ...(job.metadata ? { metadata: job.metadata } : {}),
+    ...(job.error ? { error: job.error } : {}),
+    ...(job.error_code ? { error_code: job.error_code } : {}),
+  };
+}
 // On-disk project files: each canvas (nodes+edges) is one JSON file on disk,
 // so projects are portable / version-controllable / editable outside the browser.
 const PROJECTS_DIR = path.join(os.homedir(), '.franklin', 'projects');
-fs.mkdirSync(PROJECTS_DIR, { recursive: true });
+const projectStorage = createProjectStorage(PROJECTS_DIR);
 
 // CORS — wide open in dev so any Vite port can talk to :3100. In production,
 // set ALLOWED_ORIGINS to a comma-separated list of origins (or "*" if you
@@ -495,6 +515,7 @@ function runFfmpeg(args) {
 // (the caller downloads them into the temp dir).
 function localGeneratedPath(url) {
   if (typeof url !== 'string') throw new Error('bad video url');
+  if (url.startsWith('/api/project-media/')) return resolveProjectMediaUrl(url, PROJECTS_DIR);
   if (url.startsWith('/api/generated/')) {
     const f = path.basename(url.slice('/api/generated/'.length).split('?')[0]);
     const fp = path.join(JOBS_DIR, f);
@@ -978,6 +999,76 @@ const server = http.createServer(async (req, res) => {
       }
     }
 
+    // Provider bridges used by the Media Agent. These are deliberately separate
+    // from /api/generate so manual Franklin/BlockRun nodes keep their existing
+    // behavior and billing path.
+    if (p === '/api/providers/status' && req.method === 'GET') {
+      const codex = await codexStatus();
+      const topview = await topviewStatus();
+      return json(req, res, { ok: true, codex, topview });
+    }
+
+    if (p === '/api/agent/media/status' && req.method === 'GET') {
+      const jobId = new URL(req.url, 'http://localhost').searchParams.get('jobId');
+      const job = jobId ? MEDIA_JOBS.get(jobId) : null;
+      if (!job) return json(req, res, { ok: false, error: 'media job not found' }, 404);
+      return json(req, res, mediaJobSnapshot(job));
+    }
+
+    if (p === '/api/agent/media' && req.method === 'POST') {
+      const raw = await readBody(req);
+      let body;
+      try { body = JSON.parse(raw); } catch { return json(req, res, { ok: false, error: 'bad json' }, 400); }
+      if (!body.prompt || !String(body.prompt).trim()) return json(req, res, { ok: false, error: 'prompt required' }, 400);
+      const jobId = `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+      if (body.provider === 'topview' && body.kind === 'video') {
+        const job = { jobId, provider: 'topview', kind: 'video', model: body.model || 'topview/seedance', status: 'queued', progress: null, etaSeconds: null, task_id: null, startedAt: Date.now() };
+        MEDIA_JOBS.set(jobId, job);
+        void (async () => {
+          job.status = 'running';
+          try {
+            const result = await topviewGenerateVideo({
+              prompt: String(body.prompt), model: body.model, imageUrl: body.imageUrl, imageUrl2: body.imageUrl2, imageUrls: body.imageUrls, durationS: body.durationS,
+              aspectRatio: body.aspectRatio, resolution: body.resolution, generateAudio: body.generateAudio, inputMode: body.inputMode,
+              jobsDir: JOBS_DIR, jobId,
+              onProgress: (update) => {
+                if (update?.task_id) job.task_id = update.task_id;
+                if (Number.isFinite(update?.progress)) job.progress = Math.max(0, Math.min(1, update.progress));
+                if (Number.isFinite(update?.etaSeconds)) job.etaSeconds = Math.max(0, Math.round(update.etaSeconds));
+                if (update?.status) job.status = update.status;
+              },
+            });
+            job.status = 'done'; job.progress = 1; job.resultUrl = result.resultUrl; job.task_id = result.task_id || job.task_id; job.metadata = result.metadata; job.model = result.model || job.model;
+          } catch (err) {
+            job.status = 'error'; job.error = err?.message || String(err); job.error_code = err?.code || null; job.task_id = err?.task_id || job.task_id;
+          }
+          const cleanup = setTimeout(() => MEDIA_JOBS.delete(jobId), 30 * 60 * 1000);
+          cleanup.unref?.();
+        })();
+        return json(req, res, { ...mediaJobSnapshot(job), pending: true });
+      }
+      try {
+        let result;
+        if (body.provider === 'codex' && body.kind === 'image') {
+          const imageArgs = { prompt: String(body.prompt), inputImage: body.imageUrl, aspectRatio: body.aspectRatio, size: body.size, quality: body.quality, jobsDir: JOBS_DIR, jobId };
+          result = body.edit ? await codexEditImage(imageArgs) : await codexGenerateImage(imageArgs);
+        } else if (body.provider === 'topview' && body.kind === 'video') {
+          result = await topviewGenerateVideo({
+            prompt: String(body.prompt), model: body.model, imageUrl: body.imageUrl, imageUrl2: body.imageUrl2, imageUrls: body.imageUrls, durationS: body.durationS,
+            aspectRatio: body.aspectRatio, resolution: body.resolution,
+            generateAudio: body.generateAudio, inputMode: body.inputMode, jobsDir: JOBS_DIR, jobId,
+          });
+        } else {
+          return json(req, res, { ok: false, error: 'unsupported provider/kind route' }, 400);
+        }
+        return json(req, res, result);
+      } catch (err) {
+        const message = err?.message || String(err);
+        console.warn(`[bridge] ${body.provider || 'unknown'} ${body.kind || 'unknown'} failed: ${message.slice(0, 400)}`);
+        return json(req, res, { ok: false, error: message, ...(err?.code ? { error_code: err.code } : {}), ...(err?.task_id ? { task_id: err.task_id } : {}) }, 502);
+      }
+    }
+
     if (p === '/api/generate' && req.method === 'POST') {
       const raw = await readBody(req);
       const body = JSON.parse(raw);
@@ -1027,7 +1118,7 @@ const server = http.createServer(async (req, res) => {
       try { body = JSON.parse(raw); } catch { return json(req, res, { ok: false, error: 'bad json' }, 400); }
       try {
         const ctx = getBillingContext();
-        const out = await runAgentChat({ model: body.model, messages: body.messages, defaults: body.defaults }, { ...ctx, apiUrl, jobsDir: JOBS_DIR });
+        const out = await runAgentChat({ model: body.model, reasoningEffort: body.reasoningEffort, messages: body.messages, defaults: body.defaults }, { ...ctx, apiUrl, jobsDir: JOBS_DIR });
         // Debug: log exactly which tools the model asked for (name + args) so we
         // can see the agent's run history. Written to a file (immediate flush).
         try {
@@ -1179,30 +1270,29 @@ const server = http.createServer(async (req, res) => {
     }
 
     // ── Project files (on-disk canvas persistence) ──
+    if (p === '/api/media/audit' && req.method === 'POST') {
+      const body = JSON.parse(await readBody(req));
+      return json(req, res, auditMedia({ projectsDir: PROJECTS_DIR, jobsDir: JOBS_DIR, extraReferences: Array.isArray(body.references) ? body.references.filter(v => typeof v === 'string') : [] }));
+    }
+    if (/^\/api\/projects\/[^/]+$/.test(p) && req.method === 'GET') {
+      try { return json(req, res, { ok: true, project: projectStorage.get(decodeURIComponent(p.slice('/api/projects/'.length))) }); }
+      catch (err) { return json(req, res, { ok: false, error: err.message }, err.status || 500); }
+    }
     if (p === '/api/projects' && req.method === 'GET') {
-      try {
-        const files = fs.existsSync(PROJECTS_DIR) ? fs.readdirSync(PROJECTS_DIR).filter((f) => f.endsWith('.json')) : [];
-        const projects = [];
-        for (const f of files) { try { projects.push(JSON.parse(fs.readFileSync(path.join(PROJECTS_DIR, f), 'utf8'))); } catch { /* skip corrupt */ } }
-        return json(req, res, { ok: true, projects });
-      } catch (err) { return json(req, res, { ok: false, error: String(err), projects: [] }, 500); }
+      try { return json(req, res, { ok: true, storageVersion: 2, projects: new URL(req.url, 'http://localhost').searchParams.get('summary') === '1' ? projectStorage.summaries() : projectStorage.list() }); }
+      catch (err) { return json(req, res, { ok: false, error: String(err), projects: [] }, 500); }
     }
     if (p === '/api/projects/save' && req.method === 'POST') {
       const raw = await readBody(req);
       let body; try { body = JSON.parse(raw); } catch { return json(req, res, { ok: false, error: 'bad json' }, 400); }
-      const pr = body.project;
-      if (!pr || !pr.id) return json(req, res, { ok: false, error: 'project.id required' }, 400);
-      const safe = String(pr.id).replace(/[^a-zA-Z0-9_-]/g, '');
-      if (!safe) return json(req, res, { ok: false, error: 'bad id' }, 400);
-      try { fs.writeFileSync(path.join(PROJECTS_DIR, `${safe}.json`), JSON.stringify(pr)); return json(req, res, { ok: true }); }
-      catch (err) { return json(req, res, { ok: false, error: String(err) }, 500); }
+      try { return json(req, res, { ok: true, project: projectStorage.save(body.project, body.baseRevision) }); }
+      catch (err) { const e = err instanceof ProjectStorageError ? err : new ProjectStorageError('STORAGE', String(err), 500); return json(req, res, { ok: false, error: e.message, code: e.code }, e.status); }
     }
     if (p === '/api/projects/delete' && req.method === 'POST') {
       const raw = await readBody(req);
       let body; try { body = JSON.parse(raw); } catch { return json(req, res, { ok: false, error: 'bad json' }, 400); }
-      const safe = String(body.id || '').replace(/[^a-zA-Z0-9_-]/g, '');
-      try { if (safe) fs.rmSync(path.join(PROJECTS_DIR, `${safe}.json`), { force: true }); return json(req, res, { ok: true }); }
-      catch (err) { return json(req, res, { ok: false, error: String(err) }, 500); }
+      try { return json(req, res, { ok: true, ...projectStorage.delete(body.id, body.baseRevision) }); }
+      catch (err) { const e = err instanceof ProjectStorageError ? err : new ProjectStorageError('STORAGE', String(err), 500); return json(req, res, { ok: false, error: e.message, code: e.code }, e.status); }
     }
 
     if (p === '/api/health' && req.method === 'GET') {
@@ -1231,6 +1321,24 @@ const server = http.createServer(async (req, res) => {
       }
     }
 
+    if (p.startsWith('/api/project-media/') && ['GET', 'HEAD'].includes(req.method)) {
+      let file;
+      try { file = resolveProjectMediaUrl(p, PROJECTS_DIR); } catch { res.writeHead(404); res.end('Not found'); return; }
+      const mime = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.gif': 'image/gif', '.avif': 'image/avif', '.mp4': 'video/mp4', '.webm': 'video/webm', '.mp3': 'audio/mpeg', '.wav': 'audio/wav' }[path.extname(file)] || 'application/octet-stream';
+      const size = fs.statSync(file).size;
+      let start = 0, end = size - 1;
+      const range = req.headers.range;
+      if (range) {
+        const match = /^bytes=(\d*)-(\d*)$/.exec(range);
+        if (!match || (!match[1] && !match[2])) { res.writeHead(416, { 'Content-Range': `bytes */${size}` }); res.end(); return; }
+        start = match[1] ? Number(match[1]) : Math.max(0, size - Number(match[2]));
+        end = match[1] && match[2] ? Math.min(size - 1, Number(match[2])) : size - 1;
+        if (start > end || start >= size) { res.writeHead(416, { 'Content-Range': `bytes */${size}` }); res.end(); return; }
+      }
+      res.writeHead(range ? 206 : 200, { ...corsHeaders(req), 'Content-Type': mime, 'X-Content-Type-Options': 'nosniff', 'Accept-Ranges': 'bytes', 'Content-Length': end - start + 1, ...(range ? { 'Content-Range': `bytes ${start}-${end}/${size}` } : {}), 'Cache-Control': 'private, max-age=3600' });
+      if (req.method === 'HEAD') res.end(); else fs.createReadStream(file, { start, end }).pipe(res);
+      return;
+    }
     if (p.startsWith('/api/generated/') && req.method === 'GET') {
       const filename = path.basename(p.slice('/api/generated/'.length));
       if (!filename || filename.startsWith('.') || filename.includes('/')) {

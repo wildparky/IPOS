@@ -7,7 +7,7 @@ import { useEffect, useState, type ReactNode } from 'react';
 import {
   X, Wallet, Boxes, Info, Copy, Check, ExternalLink, SlidersHorizontal, Bot, Trash2, type LucideIcon,
 } from 'lucide-react';
-import { getWallet, listAgentMemory, deleteAgentMemory, type AgentMemory } from '../api/franklin';
+import { getWallet, getProviderStatus, listAgentMemory, deleteAgentMemory, type AgentMemory } from '../api/franklin';
 import { IMAGE_MODELS, VIDEO_MODELS, MUSIC_MODELS, TEXT_MODELS } from './nodes';
 import { usePrefsStore, type EdgeStyle } from './prefsStore';
 import { useAgentPrefs, type AgentMode } from './agentPrefsStore';
@@ -384,6 +384,13 @@ function AgentPane() {
   const setImageModel = useAgentPrefs((s) => s.setImageModel);
   const videoModel = useAgentPrefs((s) => s.videoModel);
   const setVideoModel = useAgentPrefs((s) => s.setVideoModel);
+  const [providerStatus, setProviderStatus] = useState<Awaited<ReturnType<typeof getProviderStatus>>>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    getProviderStatus().then((status) => { if (!cancelled) setProviderStatus(status); });
+    return () => { cancelled = true; };
+  }, []);
 
   const modeOptions: { id: AgentMode; labelKey: StringKey; hintKey: StringKey }[] = [
     { id: 'manual', labelKey: 'agent_mode_manual', hintKey: 'agent_mode_manual_hint' },
@@ -393,6 +400,22 @@ function AgentPane() {
   return (
     <div className="settings-pane-section">
       <h2>{t('settings_section_agent')}</h2>
+
+      <h3 className="settings-subhead">Media Agent providers</h3>
+      <div className="settings-provider-grid">
+        <div className="settings-provider-card">
+          <span className="settings-provider-name">Codex</span>
+          <span className="settings-provider-role">Image generation & editing · Codex Image</span>
+          <span className={`settings-provider-state ${providerStatus?.codex.connected ? 'is-ok' : ''}`}>
+            {providerStatus?.codex.connected ? '✓ OAuth connected' : providerStatus ? 'Authentication required' : 'Checking…'}
+          </span>
+        </div>
+        <div className="settings-provider-card">
+          <span className="settings-provider-name">TopView / Seedance</span>
+          <span className="settings-provider-role">Video generation</span>
+          <span className="settings-provider-state">{providerStatus?.topview.connected ? '✓ connected' : 'OAuth managed by topview-mcp'}</span>
+        </div>
+      </div>
 
       <h3 className="settings-subhead">{t('agent_mode')}</h3>
       <div className="settings-choices">

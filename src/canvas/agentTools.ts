@@ -36,6 +36,7 @@ export interface CanvasAgentApi {
   generate(kind: GenKind, args: {
     prompt: string; model?: string; referenceNodeId?: string; fromNodeId?: string;
     durationS?: number; aspectRatio?: string; resolution?: string; audio?: boolean;
+    inputMode?: 'text' | 'omniReference' | 'firstLast' | 'singleImage';
     lyrics?: string; instrumental?: boolean;
   }): Promise<CanvasToolResult>;
   editImage(args: { nodeId: string; prompt: string; model?: string }): Promise<CanvasToolResult>;
@@ -72,10 +73,15 @@ const CANVAS_TOOLS = new Set([
 // Rough USD estimate for the confirm gate (0 when not a paid media op).
 export function estimateToolCost(name: string, input: Record<string, unknown>, prefs: { imageModel: string; videoModel: string }): number {
   if (name === 'generate_image' || name === 'edit_image' || name === 'upscale_image') {
+    // Media Agent image work is delegated to Codex OAuth; it is not priced by
+    // the Franklin/BlockRun catalog shown in these preferences.
+    return 0;
     const id = (input.model as string) || prefs.imageModel;
     return (IMAGE_MODELS.find((m) => m.id === id) ?? IMAGE_MODELS[0]).price;
   }
   if (name === 'generate_video') {
+    // Media Agent video work is delegated to the authenticated TopView MCP.
+    if (name === 'generate_video') return 0;
     const id = (input.model as string) || prefs.videoModel;
     const m = VIDEO_MODELS.find((x) => x.id === id) ?? VIDEO_MODELS[1];
     return m.pricePerS * (Number(input.duration_s) || 5);
@@ -92,10 +98,10 @@ export function toolLabel(name: string, input: Record<string, unknown>): string 
   const p = (input.prompt as string) || (input.query as string) || (input.question as string) || (input.command as string) || (input.path as string) || '';
   const short = p.length > 48 ? p.slice(0, 48) + '…' : p;
   switch (name) {
-    case 'generate_image': return `Generate image · ${short}`;
-    case 'generate_video': return `Generate video · ${short}`;
+    case 'generate_image': return `Codex image · ${short}`;
+    case 'generate_video': return `TopView / Seedance video · ${short}`;
     case 'generate_music': return `Generate music · ${short}`;
-    case 'edit_image': return `Edit image · ${short}`;
+    case 'edit_image': return `Codex edit · ${short}`;
     case 'upscale_image': return `Upscale image`;
     case 'stitch_videos': return `Stitch ${(input.node_ids as string[])?.length ?? 0} videos`;
     case 'assemble_film': return `Assemble film · ${(input.node_ids as string[])?.length ?? 0} clips`;

@@ -837,6 +837,14 @@ a:hover { text-decoration: underline; }
 .react-flow__handle:hover::after {
   color: var(--accent);
 }
+/* The node-side connector below is the only visible connection affordance.
+   Keep the underlying React Flow handles functional but remove their generic
+   decorative circles/plus signs so two connectors cannot overlap. */
+.react-flow__handle:not(.node-add-side)::before,
+.react-flow__handle:not(.node-add-side)::after {
+  content: none !important;
+  display: none !important;
+}
 .canvas-node.card-mode {
   width: 200px;
   padding: 0;
@@ -852,7 +860,7 @@ a:hover { text-decoration: underline; }
 .card-image img {
   width: 100%;
   height: 100%;
-  object-fit: cover;
+  object-fit: contain;
   display: block;
 }
 .card-placeholder {
@@ -1553,15 +1561,25 @@ button:active:not(:disabled) { transform: scale(0.97); }
 /* "+" side buttons */
 .node-add-side {
   position: absolute; top: 50%; transform: translateY(-50%); z-index: 20;
-  width: 26px; height: 26px; min-width: 26px; padding: 0; border-radius: 50%;
+  box-sizing: border-box; width: 22px !important; height: 22px !important; min-width: 22px; min-height: 22px;
+  aspect-ratio: 1 / 1; padding: 0; border-radius: 50%; line-height: 0;
   border: 1.5px solid rgba(255,255,255,0.35); background: transparent; color: rgba(255,255,255,0.85);
   display: inline-flex; align-items: center; justify-content: center; cursor: pointer; opacity: 0.65;
   transition: opacity 0.16s ease, transform 0.16s ease, background 0.14s ease, border-color 0.14s ease;
 }
-.node-add-left { left: -38px; }
-.node-add-right { right: -38px; }
+.node-add-left { left: -38px !important; }
+.node-add-right { right: -38px !important; }
 .node-add-side:hover { background: var(--accent-gradient); color: #0c0c0d; border-color: transparent; opacity: 1; transform: translateY(-50%) scale(1.1); }
-.node-add-side svg { display: block; }
+.node-add-side svg {
+  position: absolute; left: 50%; top: 50%; display: block;
+  width: 12px; height: 12px; margin: 0;
+  transform: translate(-50%, -50%);
+}
+/* The quick connector owns its visible plus icon. React Flow's generic
+   handle skin also draws a pseudo-element plus, which would otherwise create
+   a doubled icon inside this connector. */
+.node-add-side::before,
+.node-add-side::after { content: none !important; display: none !important; }
 .node-add-side.is-connected { opacity: 0; }
 .canvas-card-wrap:hover .node-add-side, .react-flow__node:hover .node-add-side, .react-flow__node.selected .node-add-side { opacity: 1; }
 .canvas-card-wrap:hover .node-add-side.is-connected:hover { opacity: 1; }
@@ -1576,7 +1594,7 @@ button:active:not(:disabled) { transform: scale(0.97); }
 .react-flow__node.selected .media-card { border-color: var(--accent-ring); box-shadow: var(--shadow-lg), 0 0 0 1px var(--accent-ring); }
 .media-card.has-result { background: #0c0c0e; }
 .media-card .media-fill { position: absolute; inset: 0; width: 100%; height: 100%; border-radius: 17px; }
-.media-img { object-fit: cover; }
+.media-img { object-fit: contain; background: var(--bg-card); }
 .media-video { object-fit: contain; background: #000; }
 .media-audio-fill { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; padding: 16px; }
 .media-audio { width: 100%; }
@@ -1603,6 +1621,8 @@ button:active:not(:disabled) { transform: scale(0.97); }
 @keyframes spin { to { transform: rotate(360deg); } }
 .media-progress { width: 60%; height: 4px; border-radius: 999px; background: rgba(255,255,255,0.12); overflow: hidden; }
 .media-progress > div { height: 100%; background: var(--accent-gradient); transition: width 0.3s ease; }
+.media-progress.is-indeterminate > div { width: 38%; animation: media-progress-slide 1.2s ease-in-out infinite; }
+@keyframes media-progress-slide { from { transform: translateX(-110%); } to { transform: translateX(270%); } }
 .media-overlay-hint { font-size: 11.5px; color: rgba(255,255,255,0.8); text-align: center; }
 
 /* upload card — theme-aware. The empty drop area uses panel-soft so it
@@ -1611,7 +1631,8 @@ button:active:not(:disabled) { transform: scale(0.97); }
    contrast against any underlying image, so it gets its own pill bg. */
 .canvas-node.card-mode { width: 200px; padding: 0; border: 1px solid var(--border); background: var(--bg-card); border-radius: var(--radius-lg); overflow: hidden; box-shadow: var(--shadow-md); }
 .card-image { position: relative; aspect-ratio: 3 / 4; background: var(--panel-soft); }
-.card-image img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.node-upload .card-image { aspect-ratio: auto; }
+.card-image img { width: 100%; height: 100%; object-fit: contain; background: var(--panel-soft); display: block; }
 .card-placeholder { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--fg-faint); font-size: 12.5px; }
 .card-upload-overlay {
   position: absolute; top: 8px; right: 8px; display: inline-flex; align-items: center; gap: 5px;
@@ -1662,10 +1683,29 @@ button:active:not(:disabled) { transform: scale(0.97); }
 }
 .panel-row { display: flex; flex-direction: column; gap: 7px; }
 .panel-row-title { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--fg-faint); }
+.panel-info-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 28px; padding: 7px 10px; border-radius: 9px; background: var(--panel-soft); border: 1px solid var(--panel-border); }
+.panel-info-strong { color: var(--fg); font-size: 12px; font-weight: 600; }
+.panel-info-muted { color: var(--fg-dim); font-size: 11px; white-space: nowrap; }
+.video-model-mode-grid { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(128px, 0.85fr); gap: 8px; align-items: stretch; }
+.video-model-column, .video-mode-column { min-width: 0; }
+.video-model-dropdown, .video-model-dropdown .model-dropdown-btn { width: 100%; }
+.video-mode-dropdown, .video-mode-dropdown .model-dropdown-btn { width: 100%; }
+.video-mode-column { display: flex; flex-direction: column; gap: 5px; }
+.panel-subtitle { color: var(--fg-faint); font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
+.video-input-mode-list { display: flex; flex-direction: column; gap: 4px; }
+.video-mode-option { width: 100%; padding: 6px 8px; border: 1px solid var(--panel-border); border-radius: 8px; background: var(--panel-soft); color: var(--fg-dim); font-size: 11px; text-align: left; cursor: pointer; }
+.video-mode-option:hover { color: var(--fg); border-color: var(--accent-ring); }
+.video-mode-option.is-active { background: var(--accent); border-color: transparent; color: #0c0c0d; font-weight: 600; }
+.panel-row-title-with-value { display: flex; align-items: center; justify-content: flex-start; gap: 8px; }
+.image-final-size { color: inherit; font-size: inherit; font-weight: inherit; letter-spacing: inherit; text-transform: none; }
 .seg { display: inline-flex; gap: 4px; flex-wrap: wrap; }
 .seg-btn { padding: 5px 11px; border-radius: 999px; border: 1px solid var(--panel-border); background: var(--panel-soft); color: var(--fg-dim); font-size: 12px; cursor: pointer; }
 .seg-btn:hover { border-color: var(--accent-ring); color: var(--fg); }
 .seg-btn.is-active { background: var(--accent); border-color: transparent; color: #0c0c0d; font-weight: 600; }
+.image-size-input { width: 100%; box-sizing: border-box; padding: 7px 9px; border: 1px solid var(--panel-border); border-radius: 8px; background: var(--panel-soft); color: var(--fg); font-size: 12px; outline: none; }
+.image-size-input:focus { border-color: var(--accent-ring); }
+.image-size-help { font-size: 10.5px; line-height: 1.35; color: var(--fg-faint); }
+.image-size-help.is-error { color: #f29b9b; }
 .ratio { display: inline-flex; align-items: center; gap: 6px; }
 .ratio-box { border: 1.5px solid currentColor; border-radius: 2px; }
 .ratio-label { font-size: 12px; }
@@ -1753,6 +1793,7 @@ button:active:not(:disabled) { transform: scale(0.97); }
 .model-dropdown-item.is-active { color: var(--accent); }
 /* Downward variant (used inside the Text node, whose dropdown sits at the top). */
 .model-dropdown-menu.is-down { top: calc(100% + 6px); bottom: auto; }
+.model-dropdown-menu.is-right { left: calc(100% + 8px); top: 0; bottom: auto; }
 /* Text-node model picker: full-width button + don't let the node clip the menu. */
 .node-model-dd { width: 100%; }
 .node-model-dd .model-dropdown-btn { width: 100%; max-width: none; justify-content: space-between; }
@@ -1816,6 +1857,8 @@ button:active:not(:disabled) { transform: scale(0.97); }
 .pb-mode { display: inline-flex; }
 .pb-mode-btn { display: inline-flex; align-items: center; gap: 5px; padding: 5px 11px; border-radius: 999px; font-size: 12.5px; color: var(--fg-dim); }
 .pb-mode-btn.is-active { background: var(--accent-bg); color: var(--accent); }
+.pb-video-summary { max-width: 330px; min-width: 0; padding: 7px 10px; border: 1px solid var(--panel-border); border-radius: 999px; background: var(--panel-soft); color: var(--fg-dim); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; }
+.pb-video-summary:hover { color: var(--fg); border-color: var(--accent-ring); }
 .pb-bound-chip { font-size: 11px; color: var(--fg-faint); }
 .pb-cost { display: inline-flex; align-items: baseline; gap: 4px; font-variant-numeric: tabular-nums; }
 .pb-cost-symbol { font-size: 10px; color: var(--fg-faint); }
@@ -1835,6 +1878,14 @@ button:active:not(:disabled) { transform: scale(0.97); }
 }
 .pb-ref-empty, .pb-ref-thumb { width: 34px; height: 34px; border-radius: 10px; border: 1px dashed var(--border-strong); background: var(--panel-soft); color: var(--fg-dim); display: inline-flex; align-items: center; justify-content: center; cursor: pointer; overflow: hidden; position: relative; padding: 0; }
 .pb-ref-thumb img { width: 100%; height: 100%; object-fit: cover; }
+.pb-prompt-editor { position: relative; }
+.pb-mention-menu { position: absolute; left: 10px; bottom: calc(100% + 8px); z-index: 50; width: min(300px, calc(100% - 20px)); max-height: 260px; overflow: auto; padding: 6px; border: 1px solid var(--panel-border); border-radius: 12px; background: var(--panel-bg); box-shadow: var(--shadow-lg); }
+.pb-mention-item { display: flex; align-items: center; gap: 9px; width: 100%; padding: 7px; border: 0; border-radius: 8px; background: transparent; color: var(--fg); text-align: left; cursor: pointer; }
+.pb-mention-item:hover { background: var(--bg-hover); }
+.pb-mention-item img { width: 34px; height: 34px; flex: 0 0 34px; border-radius: 6px; object-fit: contain; background: var(--panel-soft); }
+.pb-mention-item span { display: flex; min-width: 0; flex-direction: column; gap: 2px; }
+.pb-mention-item strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 600; }
+.pb-mention-item small { color: var(--fg-faint); font-size: 10px; }
 .pb-ref-thumb-x { position: absolute; top: -4px; right: -4px; width: 16px; height: 16px; border-radius: 50%; background: #000; color: #fff; display: inline-flex; align-items: center; justify-content: center; }
 .pb-ref-menu { position: absolute; bottom: calc(100% + 8px); left: 0; z-index: 30; width: 280px; padding: 10px; border-radius: 14px; background: var(--panel-bg); border: 1px solid var(--panel-border); box-shadow: var(--shadow-lg); }
 .pb-ref-menu-head { display: flex; align-items: center; justify-content: space-between; font-size: 12px; color: var(--fg-dim); margin-bottom: 8px; }
@@ -2429,6 +2480,15 @@ button.view-bar-pct:hover { background: var(--panel-soft); color: var(--fg); bor
 .settings-choice-hint { font-size: 12px; color: var(--fg-dim); }
 .settings-choices-compact { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .settings-choices-compact .settings-choice { padding: 9px 12px; }
+.settings-provider-grid { display: grid; gap: 8px; }
+.settings-provider-card { display: flex; flex-direction: column; gap: 3px; padding: 11px 12px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-card); }
+.settings-provider-name { font-size: 13.5px; font-weight: 600; color: var(--fg); }
+.settings-provider-role { font-size: 12px; color: var(--fg-dim); }
+.settings-provider-state { margin-top: 3px; font-size: 12px; color: var(--fg-dim); }
+.settings-provider-state.is-ok { color: var(--accent); }
+.agent-model-pickers { display: flex; align-items: flex-start; gap: 8px; width: 100%; }
+.agent-model-pickers > .model-dropdown { flex: 1 1 auto; min-width: 0; }
+.agent-model-pickers > .agent-effort-dropdown { flex: 0 0 108px; }
 
 /* ── Prompt library modal ── */
 .prompt-lib { width: min(960px, 92vw); height: min(80vh, 760px); display: flex; flex-direction: column; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: var(--shadow-lg); overflow: hidden; }

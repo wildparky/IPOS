@@ -178,10 +178,11 @@ export interface GenerateRequest {
   imageUrl2?: string;
   /** Video omni / multi-reference images (Seedance 2.0) — character/style refs. */
   referenceImageUrls?: string[];
-  aspectRatio?: 'adaptive' | '16:9' | '9:16' | '1:1' | '4:3' | '3:4' | '21:9' | '9:21';
+  aspectRatio?: 'auto' | 'adaptive' | '16:9' | '9:16' | '1:1' | '3:2' | '2:3' | '4:3' | '3:4' | '21:9' | '9:21';
   resolution?: '360p' | '480p' | '540p' | '720p' | '1080p' | '1K' | '2K' | '4K';
   generateAudio?: boolean;
-  quality?: 'standard' | 'hd';
+  inputMode?: 'text' | 'omniReference' | 'firstLast' | 'singleImage';
+  quality?: 'auto' | 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'standard' | 'hd';
   seed?: number;
   watermark?: boolean;
   returnLastFrame?: boolean;
@@ -216,6 +217,103 @@ export async function generate(req: GenerateRequest, signal?: AbortSignal): Prom
     if ((err as Error).name === 'AbortError') return { ok: false, error: 'cancelled' };
     return { ok: false, error: (err as Error).message || 'network error' };
   }
+}
+
+export interface BridgeMediaRequest {
+  provider: 'codex' | 'topview';
+  kind: 'image' | 'video';
+  prompt: string;
+  /** Exact provider model id selected in the Canvas, when applicable. */
+  model?: string;
+  imageUrl?: string;
+  imageUrl2?: string;
+  /** All selected image references for TopView Omni Reference mode. */
+  imageUrls?: string[];
+  edit?: boolean;
+  durationS?: number;
+  aspectRatio?: string;
+  size?: string;
+  resolution?: string;
+  generateAudio?: boolean;
+  inputMode?: 'text' | 'omniReference' | 'firstLast' | 'singleImage';
+  quality?: string;
+}
+
+export interface BridgeMediaResult {
+  ok: true;
+  kind: 'image' | 'video';
+  provider: 'codex' | 'topview';
+  model: string;
+  resultUrl: string;
+  task_id?: string | null;
+  metadata?: Record<string, unknown>;
+  pending?: boolean;
+  jobId?: string;
+  status?: 'queued' | 'running' | 'done' | 'error';
+  progress?: number | null;
+  etaSeconds?: number | null;
+  elapsedS?: number;
+}
+
+export interface BridgeMediaProgress {
+  jobId?: string;
+  status?: 'queued' | 'running' | 'done' | 'error';
+  progress?: number | null;
+  etaSeconds?: number | null;
+  elapsedS?: number;
+  task_id?: string | null;
+  error?: string;
+}
+
+export async function bridgeMedia(req: BridgeMediaRequest, signal?: AbortSignal, onProgress?: (state: BridgeMediaProgress) => void): Promise<BridgeMediaResult | GenerateError> {
+  try {
+    const r = await fetch(`${base}/agent/media`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(req),
+      signal,
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok || data?.ok === false) return { ok: false, error: data?.error || `bridge returned ${r.status}` };
+    onProgress?.(data);
+    if (!data.pending || !data.jobId) return data as BridgeMediaResult;
+    const wait = (ms: number) => new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(resolve, ms);
+      signal?.addEventListener('abort', () => { clearTimeout(timer); reject(new DOMException('Aborted', 'AbortError')); }, { once: true });
+    });
+    const deadline = Date.now() + 30 * 60 * 1000;
+    while (Date.now() < deadline) {
+      await wait(1000);
+      const statusResponse = await fetch(`${base}/agent/media/status?jobId=${encodeURIComponent(data.jobId)}`, { signal });
+      const state = await statusResponse.json().catch(() => ({}));
+      if (!statusResponse.ok || state?.ok === false) return { ok: false, error: state?.error || `bridge status returned ${statusResponse.status}` };
+      onProgress?.(state);
+      if (state.status === 'done') return state as BridgeMediaResult;
+      if (state.status === 'error') return { ok: false, error: state.error || 'TopView video generation failed' };
+    }
+    return { ok: false, error: 'TopView video generation timed out while waiting for task status' };
+  } catch (err) {
+    if ((err as Error).name === 'AbortError') return { ok: false, error: 'cancelled' };
+    return { ok: false, error: (err as Error).message || 'network error' };
+  }
+}
+
+export interface ProviderStatus {
+  connected: boolean;
+  provider: string;
+  model?: string;
+  detail?: unknown;
+  error?: string;
+  models?: { id: string; label: string; defaultEffort?: string; efforts?: string[] }[];
+}
+
+export async function getProviderStatus(): Promise<{ codex: ProviderStatus; topview: ProviderStatus } | null> {
+  try {
+    const r = await fetch(`${base}/providers/status`);
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok || data?.ok === false) return null;
+    return { codex: data.codex, topview: data.topview };
+  } catch { return null; }
 }
 
 export interface PlanStep {
@@ -274,12 +372,12 @@ export interface AgentChatResult {
 }
 
 export interface AgentDefaults { image?: string; video?: string; music?: string }
-export async function agentChat(model: string | undefined, messages: ChatTurn[], defaults?: AgentDefaults): Promise<AgentChatResult | GenerateError> {
+export async function agentChat(model: string | undefined, messages: ChatTurn[], defaults?: AgentDefaults, reasoningEffort?: string): Promise<AgentChatResult | GenerateError> {
   try {
     const r = await fetch(`${base}/agent/chat`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ model, messages, defaults }),
+      body: JSON.stringify({ model, reasoningEffort, messages, defaults }),
     });
     const data = await r.json().catch(() => ({}));
     if (!r.ok || data?.ok === false) return { ok: false, error: data?.error || `agent failed (${r.status})` };

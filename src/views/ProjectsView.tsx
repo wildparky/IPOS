@@ -4,10 +4,11 @@
 // the canvas (which loads it on mount).
 
 import { useEffect, useState } from 'react';
+import MediaStoragePanel from '../components/MediaStoragePanel';
 import { Plus, Trash2, Pencil, Image as ImageIcon, Film, Music, LayoutGrid, ArrowLeft } from 'lucide-react';
 import {
   listProjects, createProject, deleteProject, renameProject, setCurrentId,
-  type Project,
+  type ProjectSummary, hydrateFromFiles, loadProject, PROJECTS_CHANGED, importLegacyProjects, exportProjectRecovery,
 } from '../projects';
 
 interface Props {
@@ -16,22 +17,8 @@ interface Props {
 
 // Pick a cover image for a project card: the first image/video result on the
 // canvas, else null (we render a placeholder).
-function coverFor(p: Project): { url?: string; counts: { image: number; video: number; music: number } } {
-  let url: string | undefined;
-  const counts = { image: 0, video: 0, music: 0 };
-  for (const n of p.nodes) {
-    const d = n.data as { resultUrl?: string; imageUrl?: string };
-    if (n.type === 'imagegen' || n.type === 'upload') {
-      counts.image++;
-      if (!url) url = d.resultUrl || d.imageUrl;
-    } else if (n.type === 'videogen') {
-      counts.video++;
-      if (!url) url = d.resultUrl;
-    } else if (n.type === 'musicgen') {
-      counts.music++;
-    }
-  }
-  return { url, counts };
+function coverFor(p: ProjectSummary): { url?: string; counts: { image: number; video: number; music: number } } {
+  return { url: p.coverUrl, counts: p.counts };
 }
 
 function relTime(ts: number): string {
@@ -46,30 +33,44 @@ function relTime(ts: number): string {
 }
 
 export default function ProjectsView({ onOpenCanvas }: Props) {
-  const [projects, setProjects] = useState<Project[]>(() => listProjects());
+  const [projects, setProjects] = useState<ProjectSummary[]>(() => listProjects());
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draftName, setDraftName] = useState('');
+  const [syncError, setSyncError] = useState('');
+  useEffect(() => {
+    let active = true;
+    const changed = () => { if (active) setProjects(listProjects()); };
+    const sync = () => { void hydrateFromFiles().then(() => { if (active) setSyncError(''); }).catch(error => { if (active) setSyncError(error.message); }); };
+    window.addEventListener(PROJECTS_CHANGED, changed);
+    window.addEventListener('focus', sync);
+    sync(); const timer = setInterval(sync, 5000);
+    return () => { active = false; clearInterval(timer); window.removeEventListener(PROJECTS_CHANGED, changed); window.removeEventListener('focus', sync); };
+  }, []);
 
   const refresh = () => setProjects(listProjects());
 
-  const open = (id: string) => { setCurrentId(id); onOpenCanvas(); };
+  const open = async (id: string) => {
+    try { await loadProject(id); if (!listProjects().some(p => p.id === id)) { refresh(); return; } setCurrentId(id); onOpenCanvas(); }
+    catch (error) { setSyncError((error as Error).message); }
+  };
 
   const newProject = () => {
     createProject(`Project ${projects.length + 1}`);
     onOpenCanvas();
   };
 
-  const startRename = (p: Project) => { setEditingId(p.id); setDraftName(p.name); };
-  const commitRename = () => {
-    if (editingId && draftName.trim()) renameProject(editingId, draftName.trim());
-    setEditingId(null);
-    refresh();
+  const startRename = (p: ProjectSummary) => { setEditingId(p.id); setDraftName(p.name); };
+  const commitRename = async () => {
+    try {
+      if (editingId && draftName.trim()) await renameProject(editingId, draftName.trim());
+      setEditingId(null); refresh();
+    } catch (error) { setSyncError((error as Error).message); }
   };
 
-  const remove = (p: Project) => {
+  const remove = async (p: ProjectSummary) => {
     if (!confirm(`Delete "${p.name}"? This can't be undone.`)) return;
-    deleteProject(p.id);
-    refresh();
+    try { await deleteProject(p.id); refresh(); }
+    catch (error) { setSyncError((error as Error).message); }
   };
 
   // ESC anywhere on this view bounces back to the canvas — the toolbar's
@@ -105,6 +106,12 @@ export default function ProjectsView({ onOpenCanvas }: Props) {
           <Plus size={16} aria-hidden /> New project
         </button>
       </header>
+      <div role="status">{syncError || '서버 저장소 · 목록은 5초마다 동기화됩니다.'}</div>
+      <MediaStoragePanel />
+      <div>
+        <button onClick={() => { if (confirm('기존 브라우저 데이터를 새 복구 프로젝트로 가져올까요? 기존 서버 프로젝트는 변경하지 않습니다.')) { try { importLegacyProjects(); } catch (error) { setSyncError((error as Error).message); } } }}>브라우저 데이터 복구</button>
+        <button onClick={exportProjectRecovery}>복구본 내보내기</button>
+      </div>
 
       {projects.length === 0 ? (
         <div className="projects-empty">

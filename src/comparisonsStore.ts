@@ -1,3 +1,4 @@
+import { randomUUID } from './uuid';
 // Saved comparisons — persist a whole model-comparison (prompt, the per-model
 // result videos, and the stitched clip) so it can be reopened later in the
 // Comparison view exactly as it was, instead of being lost on reload.
@@ -28,7 +29,7 @@ export const useComparisonsStore = create<ComparisonsState>()(
   persist(
     (set) => ({
       items: [],
-      save: (c) => set((s) => ({ items: [{ ...c, id: `cmp_${crypto.randomUUID()}`, createdAt: Date.now() }, ...s.items] })),
+      save: (c) => set((s) => ({ items: [{ ...c, id: `cmp_${randomUUID()}`, createdAt: Date.now() }, ...s.items] })),
       remove: (id) => set((s) => ({ items: s.items.filter((x) => x.id !== id) })),
     }),
     { name: 'franklin-canvas:comparisons' },

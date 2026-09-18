@@ -1,3 +1,4 @@
+import { randomUUID } from './uuid';
 // Collections (收藏夹) — the user's personal favorites of good canvas results.
 // Save an image / video / audio result from any result node into a named
 // collection, then re-import it onto the canvas later. Collections are simple
@@ -45,7 +46,7 @@ interface CollectionsState {
 }
 
 function uid(prefix: string): string {
-  return `${prefix}_${crypto.randomUUID()}`;
+  return `${prefix}_${randomUUID()}`;
 }
 
 const DEFAULT_ID = 'c_default';

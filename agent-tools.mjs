@@ -23,6 +23,7 @@ import os from 'node:os';
 import { spawn } from 'node:child_process';
 import { Buffer } from 'node:buffer';
 import { LLMClient, SearchClient, BlockrunClient } from '@blockrun/llm';
+import { runCodexAgentChat } from './codex-agent-bridge.mjs';
 
 const MEMORY_FILE = path.join(os.homedir(), '.franklin', 'agent-memory.jsonl');
 
@@ -44,12 +45,12 @@ export const AGENT_TOOLS = [
     type: 'function',
     function: {
       name: 'generate_image',
-      description: `Generate an image from a text prompt and place it as a node on the canvas. Set reference_node_id to an existing image node to do image-to-image (style/subject reference). LEAVE model UNSET to use the user's configured default — only set it when the user explicitly names a model. Available models if needed: ${IMAGE_MODEL_IDS}.`,
+      description: 'Generate a still image through the authenticated Codex OAuth Agent Bridge and place it as a node on the canvas. Set reference_node_id to an existing image node for image-to-image. Do not choose a BlockRun image model for this Media Agent tool.',
       parameters: {
         type: 'object',
         properties: {
           prompt: { type: 'string', description: 'Detailed image prompt (subject, lighting, style, mood).' },
-          model: { type: 'string', description: "Image model id. OMIT to use the user's default (recommended); set only when the user explicitly names a model." },
+          model: { type: 'string', description: 'Ignored for the Codex bridge; omit this field.' },
           reference_node_id: { type: 'string', description: 'Optional node id of an existing image to use as a reference (image-to-image).' },
           aspect_ratio: { type: 'string', enum: ['1:1', '16:9', '9:16', '4:3', '3:4'], description: 'Optional aspect ratio.' },
         },
@@ -61,12 +62,12 @@ export const AGENT_TOOLS = [
     type: 'function',
     function: {
       name: 'generate_video',
-      description: `Generate a video and place it as a node on the canvas. Set from_node_id to an existing image node to animate that image (image→video); omit it for text→video. LEAVE model UNSET to use the user's configured default — only set it when the user explicitly names a model. Available models if needed: ${VIDEO_MODEL_IDS}. Note: Sora 2 only supports 4/8/12s; Seedance/Grok support 3-10s.`,
+      description: 'Generate a video through the authenticated TopView MCP using Seedance and place it as a node on the canvas. Set from_node_id to an existing image node for image-to-video; omit it for text-to-video. Do not use Codex image generation or BlockRun for this Media Agent tool.',
       parameters: {
         type: 'object',
         properties: {
           prompt: { type: 'string', description: 'Detailed motion/scene prompt.' },
-          model: { type: 'string', description: "Video model id. OMIT to use the user's default (recommended); set only when the user explicitly names a model." },
+          model: { type: 'string', description: 'TopView selects the available Seedance model; omit this field.' },
           from_node_id: { type: 'string', description: 'Optional node id of an image to animate (image→video).' },
           duration_s: { type: 'number', description: 'Clip length in seconds (default 5).' },
           aspect_ratio: { type: 'string', enum: ['16:9', '9:16', '1:1'], description: 'Optional aspect ratio (9:16 for TikTok).' },
@@ -460,7 +461,8 @@ export const AGENT_CHAT_SYSTEM = `You are the Media Agent inside a node-based AI
 You are a REAL tool-using agent: call a tool, look at its result, then decide the next step. Do NOT plan the whole thing up front and dump it — work one step at a time, reacting to what each tool returns (e.g. read a generated image with describe_media before animating it if useful).
 
 How to work:
-- For "make a video of X": usually generate_image (establish the look) → generate_video with from_node_id set to that image (animate it) → optionally generate_music. But adapt to the request.
+- Routing is strict: still-image generation and still-image editing use the Codex OAuth Agent Bridge; video generation, including image-to-video, uses authenticated TopView MCP / Seedance; music keeps its existing Franklin provider path.
+- For "make a video of X": use generate_video through TopView directly unless the user asks for a still-image concept first. For a combined concept workflow, call generate_image first, then generate_video with from_node_id set to that image.
 - Tools that return a node_id let you chain: pass that id as reference_node_id / from_node_id / node_id to the next tool.
 - Use list_canvas to see what exists. Each line shows the node's type, status, whether it has a result, AND its connections: "← from X" (X feeds this node) and "→ to Y" (this node feeds Y). Use these to understand the graph before acting. Before animating an image, check if it already has a video "→ to" it — if so, don't create a duplicate; regenerate that existing video instead. Use delete_node to clean up failed/rejected nodes when asked to tidy up.
 - To RETRY a node that failed, call regenerate_node with that node's id (find it via list_canvas — it's the one with status=error). Re-run the SAME node; do not create a new node or animate a different node just to retry.
@@ -468,6 +470,8 @@ How to work:
 - Use describe_media to actually look at a result (e.g. to verify it, caption it, or write a better follow-up prompt).
 - To turn a multi-shot storyboard into a finished film, generate each shot as its own video, then call assemble_film with those node_ids — it joins them end-to-end into one continuous clip (and lays them on a Timeline). Use stitch_videos ONLY for side-by-side model comparisons, not for storyboard films.
 - Web tools (web_search/exa) are for references, facts, and inspiration. Filesystem/bash tools operate on the user's machine — use them when the task involves local files, ffmpeg, or project work.
+- Do not use TopView for normal still-image generation. Do not use Codex built-in image generation for video generation.
+- If existing media can be reused, inspect/list the canvas instead of regenerating it unnecessarily.
 - The app shows the user a cost confirmation before each paid/destructive tool runs and may auto-approve in auto mode — you don't need to ask permission for cost yourself, just call the tool.
 - Write rich, specific prompts (lighting, motion, style, mood) — they drive real paid generations.
 - LANGUAGE: write the prompt argument for generate_image / generate_video / generate_music in the SAME language the user wrote in (if the user wrote Chinese, the prompt must be Chinese). Do NOT translate it to English.
@@ -683,8 +687,10 @@ function toSmallJpeg(srcPath) {
 export async function describeMedia({ imageUrl, question }, ctx) {
   let url = imageUrl;
   let tmp = null;
-  if (url && url.startsWith('/api/generated/')) {
-    const fp = path.join(ctx.jobsDir, path.basename(url.split('?')[0]));
+  if (url && (url.startsWith('/api/generated/') || url.startsWith('/api/project-media/'))) {
+    const fp = url.startsWith('/api/project-media/')
+      ? (await import('./project-media.mjs')).resolveProjectMediaUrl(url, path.join(path.dirname(ctx.jobsDir), 'projects'))
+      : path.join(ctx.jobsDir, path.basename(url.split('?')[0]));
     if (fs.existsSync(fp)) {
       try {
         tmp = await toSmallJpeg(fp);
@@ -742,9 +748,7 @@ function sanitizeMessages(messages) {
   return out;
 }
 
-export async function runAgentChat({ model, messages, defaults }, ctx) {
-  const client = llm(ctx);
-  const planModel = model || 'anthropic/claude-sonnet-4.6';
+export async function runAgentChat({ model, reasoningEffort, messages, defaults }, ctx) {
   // Tell the agent the user's configured default media models so it honours them
   // instead of picking its own. The app fills in these defaults whenever the
   // `model` argument is omitted, so the agent should leave `model` unset.
@@ -753,6 +757,14 @@ export async function runAgentChat({ model, messages, defaults }, ctx) {
     system += `\n\nUSER'S DEFAULT MODELS (configured in Settings): image=${defaults.image || '(app default)'}, video=${defaults.video || '(app default)'}, music=${defaults.music || '(app default)'}. DO NOT set the \`model\` argument on generate_image / generate_video / generate_music — leave it unset so these defaults are used. Only set \`model\` when the user EXPLICITLY names a specific model in their message.`;
   }
   const msgs = [{ role: 'system', content: system }, ...sanitizeMessages(messages)];
+  // Media Agent reasoning defaults to the locally authenticated Codex CLI so
+  // opening the agent does not require BlockRun wallet/API billing. Keep the
+  // legacy gateway path available for deployments that explicitly opt in.
+  if (process.env.FRANKLIN_AGENT_REASONING !== 'blockrun') {
+    return runCodexAgentChat({ system, messages: msgs, tools: AGENT_TOOLS, model, reasoningEffort });
+  }
+  const client = llm(ctx);
+  const planModel = model || 'anthropic/claude-sonnet-4.6';
   const resp = await client.chatCompletion(planModel, msgs, {
     tools: AGENT_TOOLS,
     toolChoice: 'auto',

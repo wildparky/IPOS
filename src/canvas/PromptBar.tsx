@@ -13,10 +13,10 @@ import {
   ArrowUp, ImageIcon, Film, Music, X, Plus, Upload, AlertCircle, Settings2,
   type LucideIcon,
 } from 'lucide-react';
-import { IMAGE_MODELS, VIDEO_MODELS, MUSIC_MODELS } from './nodes';
+import { IMAGE_MODELS, VIDEO_MODELS, MUSIC_MODELS, TOPVIEW_VIDEO_MODELS, TOPVIEW_VIDEO_SELECTOR } from './nodes';
 import ModelDropdown from '../components/ModelDropdown';
-import VideoSettingsPanel, { type VideoSettings, type AspectRatio } from './VideoSettingsPanel';
-import ImageSettingsPanel, { type ImageSettings, type ImageRatio, type ImageQuality } from './ImageSettingsPanel';
+import VideoSettingsPanel, { type VideoSettings, type AspectRatio, type VideoInputMode } from './VideoSettingsPanel';
+import ImageSettingsPanel, { type ImageSettings, type ImageRatio, type ImageQuality, type ImageSize } from './ImageSettingsPanel';
 import { getWallet } from '../api/franklin';
 import { useT } from '../i18n';
 
@@ -24,7 +24,7 @@ type Mode = 'imagegen' | 'videogen' | 'musicgen';
 
 const MODE_META: Record<Mode, { label: string; icon: LucideIcon; models: { id: string; label: string }[] }> = {
   imagegen: { label: 'Image', icon: ImageIcon, models: IMAGE_MODELS },
-  videogen: { label: 'Video', icon: Film, models: VIDEO_MODELS },
+  videogen: { label: 'Video', icon: Film, models: [TOPVIEW_VIDEO_SELECTOR] },
   musicgen: { label: 'Music', icon: Music, models: MUSIC_MODELS },
 };
 
@@ -48,6 +48,9 @@ interface Props {
      *  from img1 + subject from img2). For videogen → the LAST frame
      *  (first-and-last-frame interpolation, Seedance only). */
     referenceUrl2?: string | null;
+    /** All image references when the selected video mode is Omni Reference. */
+    referenceUrls?: string[];
+    inputMode?: VideoInputMode;
   }) => void;
 }
 
@@ -181,6 +184,15 @@ export default function PromptBar({ onSend }: Props) {
   const t = useT();
   const { getNode, getNodes } = useReactFlow();
   const selectedIds = useStore((s) => s.nodes.filter((n) => n.selected).map((n) => n.id));
+  const canvasImages = useStore((s) => {
+    const out: { id: string; url: string; label: string }[] = [];
+    for (const n of s.nodes) {
+      const d = n.data as { imageUrl?: string; resultUrl?: string; title?: string };
+      if (n.type === 'upload' && d.imageUrl) out.push({ id: n.id, url: d.imageUrl, label: d.title || n.id });
+      else if (n.type === 'imagegen' && d.resultUrl) out.push({ id: n.id, url: d.resultUrl, label: d.title || n.id });
+    }
+    return out;
+  });
   const selectedId = selectedIds[0] ?? null;
   const selectedNode = selectedId ? getNode(selectedId) : null;
   const selectedKind = selectedNode?.type as Mode | undefined;
@@ -188,13 +200,17 @@ export default function PromptBar({ onSend }: Props) {
 
   const [prompt, setPrompt] = useState('');
   const [model, setModel] = useState<string>(IMAGE_MODELS[0].id);
+  const [topviewModel, setTopviewModel] = useState<string>(TOPVIEW_VIDEO_MODELS[0].id);
+  const [videoInputMode, setVideoInputMode] = useState<VideoInputMode>('text');
   const [attachment, setAttachment] = useState<string | null>(null);
   // Second reference: image fusion (imagegen) or last frame (videogen).
   const [attachment2, setAttachment2] = useState<string | null>(null);
+  const [attachments, setAttachments] = useState<string[]>([]);
   // Settings popover state for the gear button. Same panel surface used on
   // the node, just anchored to the PromptBar so users can tweak size /
   // aspect / duration without clicking away from the prompt area.
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const settingsWrapRef = useRef<HTMLDivElement>(null);
   // Billing snapshot (null while loading). Account mode has no browser-visible
   // credential or wallet address; wallet mode shows a funding hint if needed.
   const [walletState, setWalletState] = useState<{
@@ -203,6 +219,15 @@ export default function PromptBar({ onSend }: Props) {
 
   const fileRef = useRef<HTMLInputElement>(null);
   const { updateNodeData } = useReactFlow();
+
+  useEffect(() => {
+    if (!settingsOpen) return;
+    const closeOnOutsideClick = (event: MouseEvent) => {
+      if (!settingsWrapRef.current?.contains(event.target as Node)) setSettingsOpen(false);
+    };
+    document.addEventListener('mousedown', closeOnOutsideClick);
+    return () => document.removeEventListener('mousedown', closeOnOutsideClick);
+  }, [settingsOpen]);
 
   useEffect(() => {
     let cancelled = false;
@@ -233,11 +258,19 @@ export default function PromptBar({ onSend }: Props) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (bound && selectedNode) {
-      const d = selectedNode.data as { prompt?: string; model?: string; referenceUrl?: string };
+      const d = selectedNode.data as { prompt?: string; model?: string; topviewModel?: string; inputMode?: VideoInputMode; referenceUrl?: string; referenceUrl2?: string; referenceUrls?: string[] };
       setPrompt(d.prompt ?? '');
-      setModel(d.model ?? MODE_META[bound].models[0].id);
-      setAttachment(d.referenceUrl ?? null);
-      setAttachment2((d as { referenceUrl2?: string }).referenceUrl2 ?? null);
+      if (bound === 'videogen') {
+        setModel(TOPVIEW_VIDEO_SELECTOR.id);
+        setTopviewModel(d.topviewModel ?? (d.model?.startsWith('topview/seedance-') ? d.model : TOPVIEW_VIDEO_MODELS[0].id));
+        setVideoInputMode(d.inputMode ?? 'text');
+      } else {
+        setModel(d.model ?? MODE_META[bound].models[0].id);
+      }
+      const refs = d.referenceUrls?.length ? d.referenceUrls : [d.referenceUrl, d.referenceUrl2].filter(Boolean) as string[];
+      setAttachments(refs);
+      setAttachment(refs[0] ?? null);
+      setAttachment2(refs[1] ?? null);
     }
   }, [selectedNode?.id, bound]);
 
@@ -276,6 +309,18 @@ export default function PromptBar({ onSend }: Props) {
     if (selectedId) updateNodeData(selectedId, { referenceUrl2: undefined });
   };
 
+  const updateOmniAttachments = (urls: string[]) => {
+    const next = [...new Set(urls.filter(Boolean))];
+    setAttachments(next);
+    setAttachment(next[0] ?? null);
+    setAttachment2(next[1] ?? null);
+    if (selectedId) updateNodeData(selectedId, {
+      referenceUrls: next,
+      referenceUrl: next[0],
+      referenceUrl2: next[1],
+    });
+  };
+
   // The bar is contextual to a generation node — hide it when nothing
   // relevant is selected.
   if (!bound) return null;
@@ -283,28 +328,78 @@ export default function PromptBar({ onSend }: Props) {
 
   const meta = MODE_META[mode];
   const ModeIcon = meta.icon;
+  const videoSpec = mode === 'videogen'
+    ? TOPVIEW_VIDEO_MODELS.find((entry) => entry.id === topviewModel)
+    : undefined;
+  const activeVideoInputMode = mode === 'videogen'
+    ? (selectedNode?.data as { inputMode?: VideoInputMode } | undefined)?.inputMode ?? videoInputMode
+    : videoInputMode;
+  const isOmniReference = mode === 'videogen' && activeVideoInputMode === 'omniReference';
 
   // A second image input is meaningful only for: image fusion (gpt-image /
   // nano-banana) and first-and-last-frame video (Seedance). Other models hide
   // the slot and never receive a second reference.
   const supportsSecondImage =
     (mode === 'imagegen' && MULTI_IMAGE_MODELS.has(model)) ||
-    (mode === 'videogen' && model.startsWith('bytedance/seedance'));
+    (mode === 'videogen' && (activeVideoInputMode === 'omniReference' || activeVideoInputMode === 'firstLast'));
   // Progressive disclosure: the 2nd slot only appears once the 1st is filled,
   // so the bar stays clean until you actually want a second reference.
-  const showSecondSlot = supportsSecondImage && !!attachment;
+  const showSecondSlot = supportsSecondImage && !isOmniReference && !!attachment;
   // Video frames are order-sensitive (first vs last), so label them; image
   // fusion references are interchangeable and need no caption.
-  const captions: [string, string] | null =
-    mode === 'videogen' ? ['First', 'Last'] : null;
+  const captions: [string, string] | null = mode === 'videogen'
+    ? activeVideoInputMode === 'omniReference' ? ['Reference 1', 'Reference 2']
+      : activeVideoInputMode === 'singleImage' ? ['Image', '']
+      : ['First', 'Last']
+    : null;
+  const videoSummaryData = mode === 'videogen'
+    ? selectedNode?.data as { ratio?: AspectRatio; durationS?: number; resolution?: string } | undefined
+    : undefined;
+  const videoSummary = mode === 'videogen'
+    ? `${videoSpec?.label ?? TOPVIEW_VIDEO_SELECTOR.label} · ${videoSummaryData?.ratio ?? '16:9'} · ${videoSummaryData?.resolution ?? '720p'} · ${videoSummaryData?.durationS ?? 5}s`
+    : '';
 
   const send = () => {
     if (!prompt.trim()) return;
     onSend({
-      nodeId: selectedId, mode, prompt, model,
+      nodeId: selectedId, mode, prompt, model: mode === 'videogen' ? topviewModel : model,
       referenceUrl: attachment,
       referenceUrl2: supportsSecondImage ? attachment2 : null,
+      referenceUrls: isOmniReference ? attachments : undefined,
+      inputMode: mode === 'videogen' ? videoInputMode : undefined,
     });
+  };
+
+  const mentionMatch = prompt.match(/(?:^|\s)@([^\s@]*)$/);
+  const mentionQuery = mentionMatch?.[1]?.toLowerCase() ?? '';
+  const mentionOptions = mentionMatch
+    ? canvasImages.filter((image) => `${image.label} ${image.id}`.toLowerCase().includes(mentionQuery)).slice(0, 8)
+    : [];
+
+  const addPromptReference = (image: { url: string; label: string }) => {
+    if (isOmniReference) {
+      updateOmniAttachments([...attachments, image.url]);
+    } else if (!attachment) {
+      setAttachment(image.url);
+      if (selectedId) updateNodeData(selectedId, { referenceUrl: image.url });
+    } else if (supportsSecondImage && !attachment2) {
+      setAttachment2(image.url);
+      if (selectedId) updateNodeData(selectedId, { referenceUrl2: image.url });
+    } else {
+      // Single-image modes have one reference slot. Selecting another asset
+      // with @ replaces that slot, matching TopView's composer behavior.
+      setAttachment(image.url);
+      if (selectedId) updateNodeData(selectedId, {
+        referenceUrl: image.url,
+        ...(mode === 'videogen' ? { referenceUrls: [image.url] } : {}),
+      });
+    }
+    const tokenStart = prompt.lastIndexOf('@');
+    const nextPrompt = tokenStart >= 0
+      ? `${prompt.slice(0, tokenStart)}@${image.label} `
+      : `${prompt}@${image.label} `;
+    setPrompt(nextPrompt);
+    if (selectedId) updateNodeData(selectedId, { prompt: nextPrompt });
   };
 
   const onKeyDown = (e: React.KeyboardEvent) => {
@@ -329,16 +424,36 @@ export default function PromptBar({ onSend }: Props) {
         </div>
       )}
       <div className="prompt-bar-top">
-        <ReferencePicker
-          attachment={attachment}
-          caption={captions?.[0]}
-          onPick={(url) => {
-            setAttachment(url);
-            if (selectedId) updateNodeData(selectedId, { referenceUrl: url });
-          }}
-          onClear={clearAttachment}
-          onUploadClick={onAttachClick}
-        />
+        {isOmniReference ? (
+          <div className="pb-ref-omni-strip" aria-label="Omni Reference images">
+            {attachments.map((url, index) => (
+              <ReferencePicker
+                key={`${url}-${index}`}
+                attachment={url}
+                onPick={(next) => updateOmniAttachments(attachments.map((item, i) => i === index ? next : item))}
+                onClear={() => updateOmniAttachments(attachments.filter((_, i) => i !== index))}
+                onUploadClick={onAttachClick}
+              />
+            ))}
+            <ReferencePicker
+              attachment={null}
+              onPick={(url) => updateOmniAttachments([...attachments, url])}
+              onClear={() => undefined}
+              onUploadClick={onAttachClick}
+            />
+          </div>
+        ) : (
+          <ReferencePicker
+            attachment={attachment}
+            caption={captions?.[0]}
+            onPick={(url) => {
+              setAttachment(url);
+              if (selectedId) updateNodeData(selectedId, { referenceUrl: url });
+            }}
+            onClear={clearAttachment}
+            onUploadClick={onAttachClick}
+          />
+        )}
         <input ref={fileRef} type="file" accept="image/*" onChange={onAttachFile} hidden />
         {showSecondSlot && (
           <>
@@ -363,20 +478,37 @@ export default function PromptBar({ onSend }: Props) {
         )}
       </div>
 
-      <textarea
-        className="prompt-bar-input"
-        value={prompt}
-        onChange={(e) => {
-          setPrompt(e.target.value);
-          // Persist as you type so the draft survives deselect→reselect (the
-          // hydrate effect reads it back from node data). No effect re-run since
-          // it's keyed on node id, not the data object.
-          if (selectedId) updateNodeData(selectedId, { prompt: e.target.value });
-        }}
-        onKeyDown={onKeyDown}
-        placeholder={t('pb_placeholder')}
-        rows={3}
-      />
+      <div className="pb-prompt-editor">
+        <textarea
+          className="prompt-bar-input"
+          value={prompt}
+          onChange={(e) => {
+            setPrompt(e.target.value);
+            // Persist as you type so the draft survives deselect→reselect (the
+            // hydrate effect reads it back from node data). No effect re-run since
+            // it's keyed on node id, not the data object.
+            if (selectedId) updateNodeData(selectedId, { prompt: e.target.value });
+          }}
+          onKeyDown={onKeyDown}
+          placeholder={t('pb_placeholder')}
+          rows={3}
+        />
+        {mentionMatch && mentionOptions.length > 0 && (
+          <div className="pb-mention-menu" role="listbox" aria-label="Select referenced canvas image">
+            {mentionOptions.map((image) => (
+              <button
+                key={image.id}
+                type="button"
+                className="pb-mention-item"
+                onMouseDown={(e) => { e.preventDefault(); addPromptReference(image); }}
+              >
+                <img src={image.url} alt="" />
+                <span><strong>@{image.label}</strong><small>{image.id}</small></span>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
 
       <div className="prompt-bar-bottom">
         <div className="pb-mode">
@@ -386,12 +518,14 @@ export default function PromptBar({ onSend }: Props) {
           </span>
         </div>
         <div className="pb-divider" />
-        <ModelDropdown models={meta.models} value={model} onChange={(m) => { setModel(m); if (selectedId) updateNodeData(selectedId, { model: m }); }} />
+        {mode !== 'videogen' && (
+          <ModelDropdown models={meta.models} value={model} onChange={(m) => { setModel(m); if (selectedId) updateNodeData(selectedId, { model: m }); }} />
+        )}
         {/* Settings gear — Video (aspect / resolution / duration / audio) and
             Image (aspect ratio / quality). Music settings live in the music
             node's lyrics popover. */}
         {mode === 'imagegen' && (
-          <div className="pb-settings-wrap">
+          <div className="pb-settings-wrap" ref={settingsWrapRef}>
             <button
               type="button"
               className={`pb-icon-btn pb-settings-btn ${settingsOpen ? 'is-active' : ''}`}
@@ -403,14 +537,15 @@ export default function PromptBar({ onSend }: Props) {
               <Settings2 size={20} strokeWidth={2.2} aria-hidden />
             </button>
             {settingsOpen && (() => {
-              const nd = selectedNode?.data as { ratio?: ImageRatio; quality?: ImageQuality } | undefined;
-              const value: ImageSettings = { ratio: nd?.ratio ?? '1:1', quality: nd?.quality ?? 'standard' };
+              const nd = selectedNode?.data as { ratio?: ImageRatio; quality?: ImageQuality; size?: ImageSize } | undefined;
+              const value: ImageSettings = { ratio: nd?.ratio ?? '1:1', quality: nd?.quality ?? 'standard', size: nd?.size ?? 'auto' };
               return (
                 <div className="pb-settings-pop">
                   <ImageSettingsPanel
+                    model={model}
                     value={value}
                     onChange={(next) => {
-                      if (selectedId) updateNodeData(selectedId, { ratio: next.ratio, quality: next.quality });
+                      if (selectedId) updateNodeData(selectedId, { ratio: next.ratio, quality: next.quality, size: next.size });
                     }}
                   />
                 </div>
@@ -419,7 +554,7 @@ export default function PromptBar({ onSend }: Props) {
           </div>
         )}
         {mode === 'videogen' && (
-          <div className="pb-settings-wrap">
+          <div className="pb-settings-wrap" ref={settingsWrapRef}>
             <button
               type="button"
               className={`pb-icon-btn pb-settings-btn ${settingsOpen ? 'is-active' : ''}`}
@@ -431,26 +566,60 @@ export default function PromptBar({ onSend }: Props) {
               <Settings2 size={20} strokeWidth={2.2} aria-hidden />
             </button>
             {settingsOpen && (() => {
-              const nd = selectedNode?.data as { mode?: 'standard' | 'pro'; ratio?: AspectRatio; durationS?: number; resolution?: '480p' | '720p' | '1080p'; audio?: boolean } | undefined;
+              const nd = selectedNode?.data as { mode?: 'standard' | 'pro'; ratio?: AspectRatio; durationS?: number; resolution?: '480p' | '720p' | '1080p' | '2160p'; audio?: boolean } | undefined;
               const value: VideoSettings = {
                 mode: nd?.mode ?? 'standard',
-                ratio: nd?.ratio ?? '16:9',
-                durationS: nd?.durationS ?? 5,
-                resolution: nd?.resolution ?? '720p',
+                ratio: nd?.ratio ?? (videoSpec?.defaultAspectRatio as AspectRatio | undefined) ?? '16:9',
+                durationS: nd?.durationS ?? videoSpec?.defaultDuration ?? 5,
+                resolution: nd?.resolution ?? (videoSpec?.defaultResolution as '480p' | '720p' | '1080p' | '2160p' | undefined) ?? '720p',
                 audio: nd?.audio ?? true,
+                inputMode: (selectedNode?.data as { inputMode?: VideoInputMode } | undefined)?.inputMode ?? videoInputMode,
               };
               return (
                 <div className="pb-settings-pop">
                   <VideoSettingsPanel
                     value={value}
+                    modelSpec={videoSpec}
+                    modelId={topviewModel}
+                    modelOptions={TOPVIEW_VIDEO_MODELS}
+                    onModelChange={(nextModel) => {
+                      setTopviewModel(nextModel);
+                      const nextSpec = TOPVIEW_VIDEO_MODELS.find((entry) => entry.id === nextModel);
+                      const nextInputMode: VideoInputMode = attachment
+                        ? nextSpec?.inputModes?.includes('singleImage') && !nextSpec.inputModes.includes('startEndFrame')
+                          ? 'singleImage'
+                          : (activeVideoInputMode === 'omniReference' || activeVideoInputMode === 'firstLast') ? activeVideoInputMode : 'firstLast'
+                        : 'text';
+                      setVideoInputMode(nextInputMode);
+                      if (selectedId) updateNodeData(selectedId, {
+                        model: nextModel,
+                        topviewModel: nextModel,
+                        ratio: nextSpec?.defaultAspectRatio ?? '16:9',
+                        durationS: nextSpec?.defaultDuration ?? 5,
+                        resolution: nextSpec?.defaultResolution ?? '720p',
+                        inputMode: nextInputMode,
+                      });
+                    }}
+                    hasImageReference={!!attachment}
                     onChange={(next) => {
-                      if (selectedId) updateNodeData(selectedId, { mode: next.mode, ratio: next.ratio, durationS: next.durationS, resolution: next.resolution, audio: next.audio });
+                      setVideoInputMode(next.inputMode ?? videoInputMode);
+                      if (selectedId) updateNodeData(selectedId, { mode: next.mode, ratio: next.ratio, durationS: next.durationS, resolution: next.resolution, audio: next.audio, inputMode: next.inputMode });
                     }}
                   />
                 </div>
               );
             })()}
           </div>
+        )}
+        {mode === 'videogen' && (
+          <button
+            type="button"
+            className="pb-video-summary"
+            onClick={() => setSettingsOpen(true)}
+            title="Open TopView Seedance settings"
+          >
+            <span>{videoSummary}</span>
+          </button>
         )}
         <div className="pb-flex" />
         <div

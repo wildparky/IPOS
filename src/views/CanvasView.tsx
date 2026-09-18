@@ -23,6 +23,7 @@ import AgentMascot from '../components/AgentMascot';
 import { useAgentPrefs } from '../canvas/agentPrefsStore';
 import { EDGE_TYPES } from '../canvas/edges';
 import PromptBar from '../canvas/PromptBar';
+import { calculateCodexOutputSize, type ImageRatio } from '../canvas/ImageSettingsPanel';
 import PromptLibrary from '../canvas/PromptLibrary';
 import CollectionsPanel from '../canvas/CollectionsPanel';
 import AnnotateModal from '../canvas/AnnotateModal';
@@ -30,9 +31,9 @@ import { type FavItem } from '../collectionsStore';
 import CanvasViewBar from '../canvas/CanvasViewBar';
 import { usePrefsStore } from '../canvas/prefsStore';
 import { CanvasContext, type ImageEditOp } from '../canvas/CanvasContext';
-import { generate, stitchComparison, concatVideos, describeMedia, type StitchItem } from '../api/franklin';
+import { generate, bridgeMedia, stitchComparison, concatVideos, describeMedia, type StitchItem } from '../api/franklin';
 import type { CanvasAgentApi } from '../canvas/agentTools';
-import { getOrCreateCurrent, saveProjectCanvas, renameProject } from '../projects';
+import { getOrCreateCurrent, saveProjectCanvas, renameProject, canonicalMedia, PROJECT_MEDIA_CHANGED } from '../projects';
 import { useUiStore } from '../uiStore';
 import { useThemeStore } from '../canvas/themeStore';
 
@@ -42,7 +43,7 @@ import { useThemeStore } from '../canvas/themeStore';
 // generic so they read for anyone, not just folks already in the Franklin
 // world.
 const CHEAP_IMAGE = IMAGE_MODELS.find((m) => m.id === 'google/nano-banana') ?? IMAGE_MODELS[0];
-const CHEAP_VIDEO = [...VIDEO_MODELS].sort((a, b) => a.pricePerS - b.pricePerS)[0];
+const CHEAP_VIDEO = VIDEO_MODELS.filter((m) => m.provider !== 'topview').sort((a, b) => a.pricePerS - b.pricePerS)[0];
 // Image models that accept a second reference (multi-image fusion). Mirrors the
 // gateway's EDIT_SUPPORTED_MODELS and the PromptBar dual-slot gate.
 const SECOND_IMAGE_IMAGE_MODELS = new Set<string>([
@@ -108,6 +109,11 @@ function CanvasInner() {
   const projectIdRef = useRef(project.id);
   const [nodes, setNodes, onNodesChange] = useNodesState(project.nodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(project.edges);
+  useEffect(() => {
+    const syncMedia = () => setNodes(current => canonicalMedia(current));
+    window.addEventListener(PROJECT_MEDIA_CHANGED, syncMedia);
+    return () => window.removeEventListener(PROJECT_MEDIA_CHANGED, syncMedia);
+  }, [setNodes]);
 
   // Persist canvas back into the current project (debounced).
   useEffect(() => {
@@ -214,8 +220,61 @@ function CanvasInner() {
   }, [getNode]);
 
   const onConnect = useCallback(
-    (params: Connection) => setEdges((eds) => addEdge({ ...params, type: 'flow' }, eds)),
-    [setEdges],
+    (params: Connection) => {
+      if (!params.source || !params.target) return;
+      const targetNode = nodes.find((node) => node.id === params.target);
+      const selectedImages = targetNode?.type === 'videogen'
+        ? nodes
+          .filter((node) => node.selected && (node.type === 'imagegen' || node.type === 'upload'))
+          .filter((node) => {
+            const data = node.data as { resultUrl?: string; imageUrl?: string };
+            return !!(data.resultUrl || data.imageUrl);
+          })
+          .sort((a, b) => a.position.x - b.position.x || a.position.y - b.position.y)
+        : [];
+      const sources = selectedImages.length > 1
+        ? selectedImages
+        : [nodes.find((node) => node.id === params.source)].filter(Boolean) as Node[];
+      if (!sources.length) return;
+
+      setEdges((eds) => {
+        const additions = sources
+          .map((source) => ({
+            id: `e-${source.id}-${params.target}`,
+            source: source.id,
+            target: params.target!,
+            sourceHandle: `${source.id}-out`,
+            targetHandle: `${params.target}-in`,
+            type: 'flow' as const,
+          }))
+          .filter((edge) => !eds.some((existing) => existing.source === edge.source && existing.target === edge.target));
+        return [...eds, ...additions];
+      });
+
+      if (targetNode?.type === 'videogen') {
+        const media = sources
+          .map((source) => (source.data as { resultUrl?: string; imageUrl?: string }).resultUrl
+            || (source.data as { resultUrl?: string; imageUrl?: string }).imageUrl)
+          .filter(Boolean) as string[];
+        if (media.length) {
+          setNodes((current) => current.map((node) => node.id === targetNode.id
+            ? {
+                ...node,
+                data: {
+                  ...node.data,
+                  referenceUrl: media[0],
+                  referenceUrl2: media[1],
+                  referenceUrls: media,
+                  inputMode: (node.data as { inputMode?: string }).inputMode === 'omniReference'
+                    ? 'omniReference'
+                    : media.length > 1 ? 'firstLast' : 'singleImage',
+                },
+              }
+            : node));
+        }
+      }
+    },
+    [nodes, setEdges, setNodes],
   );
 
   // ── Group sync drag ──
@@ -296,6 +355,45 @@ function CanvasInner() {
 
   const dismissPending = () => setPending(null);
 
+  // Explorer drops preserve original bytes and use a bounded, ordered grid.
+  const dropImages = useCallback(async (event: React.DragEvent) => {
+    if (!event.dataTransfer.files.length) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const files = Array.from(event.dataTransfer.files).filter(file =>
+      file.type.startsWith('image/') || /\.(png|jpe?g|webp|gif|bmp|avif|svg)$/i.test(file.name));
+    if (!files.length) return;
+    const origin = screenToFlowPosition({ x: event.clientX, y: event.clientY });
+    const results = await Promise.allSettled(files.map(file => new Promise<{ url: string; width: number; height: number; name: string }>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onerror = () => reject(new Error(file.name));
+      reader.onload = () => {
+        const url = reader.result as string;
+        const image = new Image();
+        image.onerror = () => reject(new Error(file.name));
+        image.onload = () => image.naturalWidth && image.naturalHeight
+          ? resolve({ url, width: image.naturalWidth, height: image.naturalHeight, name: file.name })
+          : reject(new Error(file.name));
+        image.src = url;
+      };
+      reader.readAsDataURL(file);
+    })));
+    const imported: Node[] = [];
+    const columns = Math.min(4, Math.ceil(Math.sqrt(files.length)));
+    for (const result of results) {
+      if (result.status !== 'fulfilled') continue;
+      const image = result.value;
+      const i = imported.length;
+      imported.push({ id: nextId(), type: 'upload', selected: true,
+        position: { x: origin.x + (i % columns) * 380, y: origin.y + Math.floor(i / columns) * 380 },
+        data: { label: 'photo', title: image.name, imageUrl: image.url, imageWidth: image.width, imageHeight: image.height, status: 'done', createdAt: Date.now() },
+      });
+    }
+    if (imported.length) setNodes(nodes => [...nodes.map(node => ({ ...node, selected: false })), ...imported]);
+    const failures = results.filter(result => result.status === 'rejected').length;
+    if (failures) alert(`${failures}개 이미지를 읽지 못했습니다. 나머지는 캔버스에 추가했습니다.`);
+  }, [screenToFlowPosition, setNodes]);
+
   // Cmd+V on the canvas pastes a clipboard image as an upload node.
   useEffect(() => {
     const onPaste = (e: ClipboardEvent) => {
@@ -353,6 +451,14 @@ function CanvasInner() {
     if (!pending) return;
     const id = nextId();
     const isGroup = type === 'group';
+    const sourceNode = pending.fromNodeId ? getNode(pending.fromNodeId) : undefined;
+    const sourceData = (sourceNode?.data ?? {}) as {
+      resultUrl?: string;
+      imageUrl?: string;
+      prompt?: string;
+      ratio?: string;
+    };
+    const sourceMediaUrl = sourceData.resultUrl || sourceData.imageUrl;
 
     const GAP = 80;
     const NEW_W = 280;
@@ -376,11 +482,23 @@ function CanvasInner() {
       position = { x: pending.flowX - NEW_W / 2, y: pending.flowY - NEW_H / 2 };
     }
 
+    const connectedData = type === 'videogen' && sourceMediaUrl
+      ? {
+          ...defaultData,
+          // A right-side image → video connection is an actual image-to-video
+          // input, not just a visual edge. Keep the source node intact and
+          // pass its local/project media URL to the new TopView node.
+          referenceUrl: sourceMediaUrl,
+          inputMode: 'firstLast',
+          prompt: '',
+          ratio: defaultData.ratio || '16:9',
+        }
+      : defaultData;
     const newNode: Node = {
       id,
       type,
       position,
-      data: { ...defaultData, label: NODE_CATALOG.find((n) => n.type === type)?.label.toLowerCase() ?? type },
+      data: { ...connectedData, label: NODE_CATALOG.find((n) => n.type === type)?.label.toLowerCase() ?? type },
       ...(isGroup ? { width: 360, height: 240, zIndex: -1 } : {}),
     };
     setNodes((nds) => (isGroup ? [newNode, ...nds] : [...nds, newNode]));
@@ -499,13 +617,15 @@ function CanvasInner() {
     const node = getNode(id) ?? nodes.find((n) => n.id === id);
     const d = (node?.data ?? {}) as GenNodeData & {
       mode?: 'standard' | 'pro';
-      ratio?: 'adaptive' | '16:9' | '9:16' | '1:1' | '4:3' | '3:4' | '21:9' | '9:21';
+      ratio?: 'auto' | 'adaptive' | '16:9' | '9:16' | '1:1' | '3:2' | '2:3' | '4:3' | '3:4' | '21:9' | '9:21';
       resolution?: '360p' | '480p' | '540p' | '720p' | '1080p' | '1K' | '2K' | '4K';
       audio?: boolean;
       lyrics?: string;
       lyricsMode?: 'adaptive' | 'custom';
       referenceUrl?: string;
       referenceUrl2?: string;
+      referenceUrls?: string[];
+      inputMode?: 'text' | 'omniReference' | 'firstLast' | 'singleImage';
     };
 
     let cancelled = false;
@@ -516,17 +636,16 @@ function CanvasInner() {
         ? { ...n, data: { ...n.data, elapsedS: Math.floor((Date.now() - startedAt) / 1000) } }
         : n)));
     }, 1000);
-    (async () => {
-      for (let p = 0.05; p <= 0.85; p += 0.03) {
-        if (cancelled) return;
-        await new Promise((r) => setTimeout(r, 350));
-        setNodes((nds) => nds.map((n) => (n.id === id ? { ...n, data: { ...n.data, progress: p } } : n)));
-      }
-    })();
-
     const rawRef = (mode === 'imagegen' || mode === 'videogen') ? (referenceUrlOverride ?? d.referenceUrl) : undefined;
-    // Video seed images especially must be small; shrink before sending.
-    const imageUrl = await shrinkReference(rawRef, mode === 'videogen' ? 768 : 1024);
+    const rawOmniRefs = mode === 'videogen' && d.inputMode === 'omniReference'
+      ? [...new Set([referenceUrlOverride, ...(d.referenceUrls || []), d.referenceUrl].filter(Boolean))] as string[]
+      : rawRef ? [rawRef] : [];
+    const selectedModel = modelOverride ?? (mode === 'videogen' ? (d as { topviewModel?: string }).topviewModel ?? d.model : d.model);
+    const preserveReferences = mode === 'videogen' && selectedModel.startsWith('topview/');
+    // TopView uploads retain original bytes; legacy providers keep their resize policy.
+    const imageUrls = (await Promise.all(rawOmniRefs.map((url) => preserveReferences ? url : shrinkReference(url, mode === 'videogen' ? 768 : 1024))))
+      .filter((url): url is string => !!url);
+    const imageUrl = imageUrls[0];
     // Second image: imagegen → fusion reference; videogen → last frame. Only
     // send it when the CURRENT model actually supports a second image (image
     // fusion models / Seedance first-last) — otherwise a stale ref left over
@@ -536,26 +655,72 @@ function CanvasInner() {
       mode === 'imagegen' ? SECOND_IMAGE_IMAGE_MODELS.has(effModel)
       : mode === 'videogen' ? effModel.startsWith('bytedance/seedance')
       : false;
-    const rawRef2 = supportsSecondImage ? d.referenceUrl2 : undefined;
-    const imageUrl2 = await shrinkReference(rawRef2, mode === 'videogen' ? 768 : 1024);
+    const rawRef2 = mode === 'videogen' && d.inputMode !== 'omniReference'
+      && (effModel.startsWith('topview/') || supportsSecondImage) ? d.referenceUrl2 : undefined;
+    const imageUrl2 = preserveReferences ? rawRef2 : await shrinkReference(rawRef2, mode === 'videogen' ? 768 : 1024);
 
     const kindMap = { imagegen: 'image', videogen: 'video', musicgen: 'music' } as const;
-    const result = await generate({
-      kind: kindMap[mode],
-      prompt,
-      model: modelOverride ?? d.model,
-      durationS: mode === 'videogen' ? (d.durationS ?? 5) : mode === 'musicgen' ? (d.durationS ?? 8) : undefined,
-      lyrics: mode === 'musicgen' && d.lyricsMode === 'custom' ? d.lyrics : undefined,
-      instrumental: mode === 'musicgen' ? !d.lyrics && d.lyricsMode === 'adaptive' ? false : undefined : undefined,
-      imageUrl,
-      imageUrl2,
-      // Gateway params from the node's settings panel. Aspect ratio applies to
-      // both image and video; quality is image-only; resolution/audio video-only.
-      aspectRatio: (mode === 'videogen' || mode === 'imagegen') ? d.ratio : undefined,
-      resolution: mode === 'videogen' ? d.resolution : undefined,
-      generateAudio: mode === 'videogen' ? (d.audio ?? true) : undefined, // default ON (audio is included in the price)
-      quality: mode === 'imagegen' ? (d as { quality?: 'standard' | 'hd' }).quality : undefined,
-    });
+    const bridgeProvider = mode === 'imagegen' && selectedModel === 'codex/gpt-image-2'
+      ? 'codex' as const
+      : mode === 'videogen' && selectedModel.startsWith('topview/seedance')
+        ? 'topview' as const
+        : null;
+    if (bridgeProvider !== 'topview') {
+      (async () => {
+        for (let p = 0.05; p <= 0.85; p += 0.03) {
+          if (cancelled) return;
+          await new Promise((r) => setTimeout(r, 350));
+          setNodes((nds) => nds.map((n) => (n.id === id ? { ...n, data: { ...n.data, progress: p } } : n)));
+        }
+      })();
+    }
+    const result = bridgeProvider
+      ? await bridgeMedia({
+          provider: bridgeProvider,
+          kind: mode === 'imagegen' ? 'image' : 'video',
+          prompt,
+          model: selectedModel,
+          imageUrl,
+          imageUrl2,
+          imageUrls: mode === 'videogen' && d.inputMode === 'omniReference' ? imageUrls : undefined,
+          inputMode: mode === 'videogen' ? d.inputMode : undefined,
+        ...(mode === 'imagegen' ? {
+          edit: !!imageUrl,
+          aspectRatio: d.ratio,
+          size: calculateCodexOutputSize((d.ratio || 'auto') as ImageRatio, (d as { size?: string }).size || 'auto'),
+          quality: (d as { quality?: string }).quality,
+        } : {
+          durationS: d.durationS ?? 5,
+          aspectRatio: d.ratio || '16:9',
+          resolution: d.resolution || '720p',
+          generateAudio: d.audio !== false,
+          }),
+        }, undefined, bridgeProvider === 'topview' ? (state) => {
+          setNodeStatus(id, 'running', {
+            progress: state.progress ?? null,
+            elapsedS: state.elapsedS,
+            etaSeconds: state.etaSeconds ?? null,
+            taskId: state.task_id ?? undefined,
+            progressSource: 'topview-mcp',
+          });
+        } : undefined)
+      : await generate({
+        kind: kindMap[mode],
+        prompt,
+        model: selectedModel,
+        durationS: mode === 'videogen' ? (d.durationS ?? 5) : mode === 'musicgen' ? (d.durationS ?? 8) : undefined,
+        lyrics: mode === 'musicgen' && d.lyricsMode === 'custom' ? d.lyrics : undefined,
+        instrumental: mode === 'musicgen' ? !d.lyrics && d.lyricsMode === 'adaptive' ? false : undefined : undefined,
+        imageUrl,
+        imageUrl2,
+        // Gateway params from the node's settings panel. Aspect ratio applies to
+        // both image and video; quality is image-only; resolution/audio video-only.
+        aspectRatio: (mode === 'videogen' || mode === 'imagegen') ? d.ratio : undefined,
+        resolution: mode === 'videogen' ? d.resolution : undefined,
+          generateAudio: mode === 'videogen' ? (d.audio ?? true) : undefined,
+          inputMode: mode === 'videogen' ? d.inputMode : undefined,
+      quality: mode === 'imagegen' ? (d as { quality?: 'auto' | 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'standard' | 'hd' }).quality : undefined,
+      });
     cancelled = true;
     clearInterval(tick);
 
@@ -620,6 +785,7 @@ function CanvasInner() {
     model: string;
     referenceUrl: string | null;
     referenceUrl2?: string | null;
+    inputMode?: 'text' | 'omniReference' | 'firstLast' | 'singleImage';
   }) => {
     const ref = payload.referenceUrl || undefined;
     const ref2 = payload.referenceUrl2 || undefined;
@@ -627,7 +793,7 @@ function CanvasInner() {
       const target = nodes.find((n) => n.id === payload.nodeId);
       if (target && target.type === payload.mode) {
         setNodes((nds) => nds.map((n) => (n.id === payload.nodeId
-          ? { ...n, data: { ...n.data, prompt: payload.prompt, model: payload.model, referenceUrl: ref, referenceUrl2: ref2, status: 'running', progress: 0 } }
+          ? { ...n, data: { ...n.data, prompt: payload.prompt, model: payload.model, topviewModel: payload.mode === 'videogen' ? payload.model : undefined, inputMode: payload.inputMode, referenceUrl: ref, referenceUrl2: ref2, status: 'running', progress: 0 } }
           : n)));
         void simulateGen(payload.nodeId, payload.mode, payload.prompt, ref);
         return;
@@ -642,7 +808,7 @@ function CanvasInner() {
       id,
       type: entry.type,
       position: { x, y },
-      data: { ...entry.defaultData, prompt: payload.prompt, model: payload.model, referenceUrl: ref, referenceUrl2: ref2, status: 'idle' as NodeStatus },
+      data: { ...entry.defaultData, prompt: payload.prompt, model: payload.model, topviewModel: payload.mode === 'videogen' ? payload.model : undefined, inputMode: payload.inputMode, referenceUrl: ref, referenceUrl2: ref2, status: 'idle' as NodeStatus },
     };
     setNodes((nds) => [...nds, newNode]);
     void simulateGen(id, payload.mode, payload.prompt, ref);
@@ -785,14 +951,56 @@ function CanvasInner() {
       const catalog = kind === 'imagegen' ? IMAGE_MODELS : kind === 'videogen' ? VIDEO_MODELS : MUSIC_MODELS;
       const fallback = kind === 'imagegen' ? agentImageModel : kind === 'videogen' ? agentVideoModel : MUSIC_MODELS[0].id;
       const model = (args.model && catalog.some((m) => m.id === args.model)) ? args.model : fallback;
-      const data: Record<string, unknown> = { title: kind, model, prompt: args.prompt, priceUsd: 0, status: 'idle' as NodeStatus, referenceUrl: refUrl };
+      const bridge = kind === 'imagegen' ? 'codex' : kind === 'videogen' ? 'topview' : null;
+      // Media Agent video work is always routed through TopView. If an older
+      // saved preference contains a gateway Seedance id, use the MCP's
+      // verified default instead of passing a non-TopView id to the bridge.
+      const bridgeModel = bridge === 'topview'
+        ? (model.startsWith('topview/') ? model : 'topview/seedance-2.5')
+        : model;
+      const data: Record<string, unknown> = {
+        title: kind === 'imagegen' ? 'Codex Image' : kind === 'videogen' ? 'TopView · Seedance' : kind,
+        model: bridge === 'codex' ? 'codex-image' : bridgeModel,
+        provider: bridge || 'franklin', prompt: args.prompt, priceUsd: 0, status: 'idle' as NodeStatus, referenceUrl: refUrl,
+      };
       if (kind === 'videogen') { data.durationS = args.durationS ?? 5; data.ratio = args.aspectRatio || '16:9'; data.resolution = args.resolution || '720p'; data.audio = args.audio !== false; }
       if (kind === 'musicgen') { data.durationS = args.durationS ?? 8; if (args.lyrics) { data.lyrics = args.lyrics; data.lyricsMode = 'custom'; } if (args.instrumental != null) data.instrumental = args.instrumental; }
       const newNode: Node = { id, type: kind, position: placeAgentNode(refId), data, selected: true };
       setNodes((nds) => [...nds.map((n) => ({ ...n, selected: false })), newNode]);
       if (refId) setEdges((eds) => addEdge({ id: `e-${refId}-${id}`, source: refId, target: id, sourceHandle: `${refId}-out`, targetHandle: `${id}-in`, type: 'flow' }, eds));
       setTimeout(() => fitView({ padding: 0.35, duration: 400, maxZoom: 1 }), 90);
-      const res = await simulateGen(id, kind, args.prompt, refUrl);
+      const res = bridge
+        ? await (async () => {
+          setNodeStatus(id, 'running', { progress: 0, errorMessage: undefined });
+          const bridged = await bridgeMedia({
+            provider: bridge,
+            kind: kind === 'imagegen' ? 'image' : 'video',
+            prompt: args.prompt,
+            model: bridgeModel,
+            imageUrl: refUrl,
+            edit: kind === 'imagegen' && !!refId,
+            durationS: args.durationS ?? 5,
+            aspectRatio: args.aspectRatio || (kind === 'videogen' ? '16:9' : undefined),
+            resolution: args.resolution || (kind === 'videogen' ? '720p' : undefined),
+            generateAudio: args.audio !== false,
+            inputMode: kind === 'videogen' ? args.inputMode : undefined,
+          }, undefined, kind === 'videogen' ? (state) => {
+            setNodeStatus(id, 'running', {
+              progress: state.progress ?? null,
+              elapsedS: state.elapsedS,
+              etaSeconds: state.etaSeconds ?? null,
+              taskId: state.task_id ?? undefined,
+              progressSource: 'topview-mcp',
+            });
+          } : undefined);
+          if (bridged.ok) {
+            setNodeStatus(id, 'done', { resultUrl: bridged.resultUrl, progress: 1, provider: bridged.provider, model: bridged.model, taskId: bridged.task_id, bridgeMetadata: bridged.metadata });
+            return { ok: true as const, resultUrl: bridged.resultUrl };
+          }
+          setNodeStatus(id, 'error', { progress: 0, errorMessage: bridged.error });
+          return { ok: false as const, error: bridged.error };
+        })()
+        : await simulateGen(id, kind, args.prompt, refUrl);
       return res.ok ? { ok: true, nodeId: id, resultUrl: res.resultUrl } : { ok: false, error: res.error };
     },
     async editImage({ nodeId, prompt, model }) {
@@ -1062,6 +1270,12 @@ function CanvasInner() {
       <div className="canvas-body">
         <div className={`canvas-flow ${showMinimap ? 'has-minimap' : ''}`} onClick={dismissPending}>
         <ReactFlow
+          onDragOver={(event) => {
+            if (Array.from(event.dataTransfer.types).includes('Files')) {
+              event.preventDefault(); event.dataTransfer.dropEffect = 'copy';
+            }
+          }}
+          onDrop={dropImages}
           nodes={nodes}
           edges={edges}
           onNodesChange={onNodesChange}
@@ -1085,12 +1299,17 @@ function CanvasInner() {
           zoomOnScroll={false}
           zoomOnPinch
           zoomActivationKeyCode={['Meta', 'Control']}
-          panOnDrag
-          selectionOnDrag={false}
+          // Canvas navigation follows the familiar editor convention:
+          // middle-button drag pans, while left-button drag on empty space
+          // creates a multi-selection marquee.
+          panOnDrag={[2]}
+          selectionOnDrag
           selectNodesOnDrag={false}
           deleteKeyCode={['Delete', 'Backspace']}
           minZoom={0.2}
-          maxZoom={2.5}
+          // Allow unlimited canvas zoom; fitView calls still use their own
+          // conservative maxZoom when automatically framing new content.
+          maxZoom={Infinity}
         >
           {showDots && <Background variant={BackgroundVariant.Dots} gap={20} size={1.2} color={bgDotColor} />}
           {showMinimap && <MiniMap pannable zoomable maskColor={minimapMask} />}

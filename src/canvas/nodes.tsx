@@ -7,7 +7,7 @@ import { createPortal } from 'react-dom';
 import { Upload, ImageIcon, Film, Type, SquareDashed, Clapperboard, ImagePlus, Upload as ReplaceIcon, Loader2, Music, X, Plus } from 'lucide-react';
 import NodeFrame from './NodeFrame';
 import NodeActionMenu from './NodeActionMenu';
-import VideoSettingsPanel, { type VideoSettings, type AspectRatio } from './VideoSettingsPanel';
+import VideoSettingsPanel, { type VideoSettings, type AspectRatio, type VideoInputMode } from './VideoSettingsPanel';
 import LyricsPanel, { type LyricsMode } from './LyricsPanel';
 import ModelDropdown from '../components/ModelDropdown';
 import Lightbox from './Lightbox';
@@ -17,7 +17,10 @@ export type NodeStatus = 'idle' | 'running' | 'done' | 'error';
 
 export interface BaseNodeData extends Record<string, unknown> {
   status?: NodeStatus;
-  progress?: number;
+  progress?: number | null;
+  etaSeconds?: number | null;
+  progressSource?: string;
+  taskId?: string;
   resultUrl?: string;
   resultText?: string;
   errorMsg?: string;
@@ -25,6 +28,8 @@ export interface BaseNodeData extends Record<string, unknown> {
 
 export interface UploadNodeData extends BaseNodeData {
   imageUrl?: string;
+  imageWidth?: number;
+  imageHeight?: number;
 }
 
 export interface GenNodeData extends BaseNodeData {
@@ -46,6 +51,8 @@ export interface TextNodeData extends BaseNodeData {
 // 2026-05-31. Models that aren't in the gateway catalog have been removed
 // (otherwise a Send hits a 404). Keep this list in sync with gateway updates.
 export const IMAGE_MODELS = [
+  // Codex OAuth image generation — no Franklin wallet charge.
+  { id: 'codex/gpt-image-2', label: 'Codex GPT Image 2', price: 0 },
   { id: 'google/nano-banana', label: 'Nano Banana', price: 0.05 },
   { id: 'google/nano-banana-pro', label: 'Nano Banana Pro', price: 0.10 },
   { id: 'openai/gpt-image-1', label: 'GPT Image 1', price: 0.02 },
@@ -56,7 +63,46 @@ export const IMAGE_MODELS = [
 ];
 
 // per-second pricing; cheapest first so the demo default cost stays low.
-export const VIDEO_MODELS = [
+export interface VideoModelSpec {
+  id: string;
+  label: string;
+  pricePerS: number;
+  provider?: 'topview';
+  submitModel?: string;
+  defaultResolution?: string;
+  defaultDuration?: number;
+  defaultAspectRatio?: string;
+  resolutions?: string[];
+  durations?: number[];
+  aspectRatios?: string[];
+  inputModes?: ('text' | 'singleImage' | 'startEndFrame')[];
+  /** TopView Canvas mode labels mapped from the MCP input capability. */
+  supportedModes?: ('text' | 'omniReference' | 'firstLast' | 'singleImage')[];
+}
+
+export const TOPVIEW_VIDEO_SELECTOR = {
+  id: 'topview/seedance',
+  label: 'Seedance · TopView',
+  pricePerS: 0,
+  provider: 'topview' as const,
+};
+
+const TOPVIEW_ASPECT_RATIOS = ['adaptive', '9:16', '3:4', '1:1', '4:3', '16:9', '21:9'];
+
+// These are the Seedance models exposed by the authenticated TopView MCP
+// generation config. The bridge still performs live MCP discovery/validation;
+// this catalog gives the Canvas a predictable, model-aware UX.
+export const TOPVIEW_SEEDANCE_MODELS: VideoModelSpec[] = [
+  { id: 'topview/seedance-2.5', label: 'Seedance 2.5', pricePerS: 0, provider: 'topview', submitModel: 'Seedance 2.5', defaultResolution: '720p', defaultDuration: 4, defaultAspectRatio: '16:9', resolutions: ['480p', '720p', '1080p'], durations: Array.from({ length: 27 }, (_, i) => i + 4), aspectRatios: TOPVIEW_ASPECT_RATIOS, inputModes: ['text', 'startEndFrame'], supportedModes: ['text', 'omniReference', 'firstLast'] },
+  { id: 'topview/seedance-2.0', label: 'Seedance 2.0', pricePerS: 0, provider: 'topview', submitModel: 'Seedance 2.0', defaultResolution: '480p', defaultDuration: 4, defaultAspectRatio: '16:9', resolutions: ['480p', '720p', '1080p', '2160p'], durations: Array.from({ length: 12 }, (_, i) => i + 4), aspectRatios: TOPVIEW_ASPECT_RATIOS, inputModes: ['text', 'startEndFrame'], supportedModes: ['text', 'omniReference', 'firstLast'] },
+  { id: 'topview/seedance-2.0-mini', label: 'Seedance 2.0 Mini', pricePerS: 0, provider: 'topview', submitModel: 'Seedance 2.0 Mini', defaultResolution: '480p', defaultDuration: 4, defaultAspectRatio: '16:9', resolutions: ['480p', '720p'], durations: Array.from({ length: 12 }, (_, i) => i + 4), aspectRatios: TOPVIEW_ASPECT_RATIOS, inputModes: ['text', 'startEndFrame'], supportedModes: ['text', 'omniReference', 'firstLast'] },
+  { id: 'topview/seedance-2.0-fast', label: 'Seedance 2.0 Fast', pricePerS: 0, provider: 'topview', submitModel: 'Seedance 2.0 Fast', defaultResolution: '480p', defaultDuration: 4, defaultAspectRatio: '16:9', resolutions: ['480p', '720p'], durations: Array.from({ length: 12 }, (_, i) => i + 4), aspectRatios: TOPVIEW_ASPECT_RATIOS, inputModes: ['text', 'startEndFrame'], supportedModes: ['text', 'omniReference', 'firstLast'] },
+  { id: 'topview/seedance-1.5-pro', label: 'Seedance 1.5 Pro', pricePerS: 0, provider: 'topview', submitModel: 'Seedance 1.5 Pro', defaultResolution: '720p', defaultDuration: 4, defaultAspectRatio: '16:9', resolutions: ['720p', '1080p'], durations: Array.from({ length: 9 }, (_, i) => i + 4), aspectRatios: TOPVIEW_ASPECT_RATIOS, inputModes: ['text', 'startEndFrame'], supportedModes: ['text', 'omniReference', 'firstLast'] },
+  { id: 'topview/seedance-1.0-pro', label: 'Seedance 1.0 Pro', pricePerS: 0, provider: 'topview', submitModel: 'Seedance 1.0 Pro', defaultResolution: '720p', defaultDuration: 5, defaultAspectRatio: '16:9', resolutions: ['720p', '1080p'], durations: [5, 10, 12], aspectRatios: TOPVIEW_ASPECT_RATIOS, inputModes: ['text', 'startEndFrame'], supportedModes: ['text', 'omniReference', 'firstLast'] },
+  { id: 'topview/seedance-1.0-pro-fast', label: 'Seedance 1.0 Pro Fast', pricePerS: 0, provider: 'topview', submitModel: 'Seedance 1.0 Pro Fast', defaultResolution: '720p', defaultDuration: 5, defaultAspectRatio: '16:9', resolutions: ['720p', '1080p'], durations: [5, 10, 12], aspectRatios: TOPVIEW_ASPECT_RATIOS, inputModes: ['text', 'singleImage'], supportedModes: ['text', 'singleImage'] },
+];
+
+export const VIDEO_MODELS: VideoModelSpec[] = [
   // pricePerS = the gateway's actual per-second charge incl. its 5% margin
   // (verified against the live /v1/videos/generations quote). Seedance is
   // token-billed at 720p; 1080p costs ~2.25× (not reflected in this flat estimate).
@@ -65,7 +111,13 @@ export const VIDEO_MODELS = [
   { id: 'azure/sora-2', label: 'Sora 2', pricePerS: 0.105 },
   { id: 'bytedance/seedance-2.0-fast', label: 'Seedance 2.0 Fast', pricePerS: 0.238 },
   { id: 'bytedance/seedance-2.0', label: 'Seedance 2.0 Pro', pricePerS: 0.298 },
+  // TopView MCP / Seedance route. Authentication and billing are managed by
+  // the configured MCP host, so no Franklin wallet price is shown.
+  TOPVIEW_VIDEO_SELECTOR,
 ];
+
+/** Full model list used only inside the TopView settings popover. */
+export const TOPVIEW_VIDEO_MODELS = TOPVIEW_SEEDANCE_MODELS;
 
 export const MUSIC_MODELS = [
   { id: 'minimax/music-2.5+', label: 'MiniMax Music 2.5+', price: 0.15 },
@@ -154,8 +206,10 @@ function AddSideButton({ id, side = 'right' }: { id: string; side?: 'left' | 'ri
     s.edges.some((e) => (side === 'right' ? e.source === id : e.target === id)),
   );
   return (
-    <button
-      type="button"
+    <Handle
+      type={side === 'right' ? 'source' : 'target'}
+      position={side === 'right' ? Position.Right : Position.Left}
+      id={`${id}-${side}-quick`}
       className={`node-add-side node-add-${side} nodrag ${isConnected ? 'is-connected' : ''}`}
       aria-label="Add connected node"
       title="Add connected node"
@@ -167,7 +221,7 @@ function AddSideButton({ id, side = 'right' }: { id: string; side?: 'left' | 'ri
       }}
     >
       <Plus size={18} strokeWidth={2.75} aria-hidden />
-    </button>
+    </Handle>
   );
 }
 
@@ -202,17 +256,35 @@ function NodeHeader({ icon: Icon, title, status }: { icon: typeof Upload; title:
 export function UploadNode({ data, id }: NodeProps) {
   useRefreshHandles(id);
   const d = data as UploadNodeData & { title?: string };
-  const [, force] = useState(0);
+  const { updateNodeData } = useReactFlow();
+
+  const imageWidth = d.imageWidth || 200;
+  const imageHeight = d.imageHeight || 267;
+  const imageScale = Math.min(1, 300 / Math.max(imageWidth, imageHeight));
+  const cardWidth = Math.round(imageWidth * imageScale);
+  const cardHeight = Math.round(imageHeight * imageScale);
+
+  const onImageLoad = (e: React.SyntheticEvent<HTMLImageElement>) => {
+    const image = e.currentTarget;
+    if (d.imageWidth === image.naturalWidth && d.imageHeight === image.naturalHeight) return;
+    updateNodeData(id, {
+      imageWidth: image.naturalWidth,
+      imageHeight: image.naturalHeight,
+    });
+  };
 
   const onFile = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     const reader = new FileReader();
     reader.onload = () => {
-      d.imageUrl = reader.result as string;
-      d.status = 'done';
-      d.createdAt = Date.now();
-      force((n) => n + 1);
+      updateNodeData(id, {
+        imageUrl: reader.result as string,
+        imageWidth: undefined,
+        imageHeight: undefined,
+        status: 'done',
+        createdAt: Date.now(),
+      });
     };
     reader.readAsDataURL(file);
   };
@@ -232,11 +304,11 @@ export function UploadNode({ data, id }: NodeProps) {
         onDownload={() => d.imageUrl && void downloadUrl(d.imageUrl, `${d.title || id}.png`)}
         onExpand={() => d.imageUrl && setUploadLightbox(true)}
       >
-        <div className="canvas-node node-upload card-mode">
+        <div className="canvas-node node-upload card-mode" style={{ width: cardWidth }}>
           <CornerDelete id={id} />
-          <div className="card-image">
+          <div className="card-image" style={{ width: cardWidth, height: cardHeight }}>
             {d.imageUrl ? (
-              <img src={d.imageUrl} alt="Uploaded reference" />
+              <img src={d.imageUrl} alt="Uploaded reference" onLoad={onImageLoad} />
             ) : (
               <div className="card-placeholder">drop or upload</div>
             )}
@@ -408,15 +480,17 @@ export function ImageGenNode({ data, id }: NodeProps) {
 
 // ── Video Gen ──
 function VideoCard({
-  id, src, poster, status, progress, errorMessage, elapsedS,
+  id, src, poster, status, progress, errorMessage, elapsedS, etaSeconds, progressSource,
 }: {
   id: string;
   src?: string;
   poster?: string;
   status?: NodeStatus;
-  progress: number;
+  progress: number | null;
   errorMessage?: string;
   elapsedS?: number;
+  etaSeconds?: number | null;
+  progressSource?: string;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
 
@@ -428,7 +502,7 @@ function VideoCard({
           <div className="media-placeholder media-error">
             <Film size={26} strokeWidth={1.4} aria-hidden />
             <span>{errorMessage || 'Generation failed'}</span>
-            <span className="media-error-hint">Hit Send again to retry. No payment was taken.</span>
+            <span className="media-error-hint">Check the provider task before retrying. A submitted task may already have been charged.</span>
           </div>
         ) : (
           <div className="media-placeholder">
@@ -439,9 +513,12 @@ function VideoCard({
         {status === 'running' && (
           <div className="media-overlay">
             <Loader2 className="media-spin" size={20} aria-hidden />
-            <div className="media-progress"><div style={{ width: `${progress * 100}%` }} /></div>
+            <div className={`media-progress${progress == null ? ' is-indeterminate' : ''}`}><div style={progress == null ? undefined : { width: `${progress * 100}%` }} /></div>
             <span className="media-overlay-hint">
-              {(progress ?? 0) >= 0.85 ? 'Rendering — almost there' : 'Generating… video can take 1–6 min'}
+              {progress != null ? `${progressSource === 'topview-mcp' ? 'TopView' : 'Generating'} · ${Math.round(progress * 100)}%` : progressSource === 'topview-mcp' ? 'TopView MCP processing' : 'Generating…'}
+              {typeof etaSeconds === 'number' && etaSeconds >= 0 && (
+                <> · ETA {etaSeconds >= 60 ? `${Math.floor(etaSeconds / 60)}m ${etaSeconds % 60}s` : `${etaSeconds}s`}</>
+              )}
               {typeof elapsedS === 'number' && elapsedS > 0 && (
                 <> · {elapsedS >= 60 ? `${Math.floor(elapsedS / 60)}m ${elapsedS % 60}s` : `${elapsedS}s`}</>
               )}
@@ -472,7 +549,7 @@ function VideoCard({
 
 export function VideoGenNode({ data, id }: NodeProps) {
   useRefreshHandles(id);
-  const d = data as GenNodeData & { title?: string; ratio?: AspectRatio; mode?: 'standard' | 'pro'; resolution?: '480p' | '720p' | '1080p'; audio?: boolean };
+  const d = data as GenNodeData & { title?: string; ratio?: AspectRatio; mode?: 'standard' | 'pro'; resolution?: '480p' | '720p' | '1080p' | '2160p'; audio?: boolean; topviewModel?: string; inputMode?: VideoInputMode };
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
   const { getNodes, updateNodeData } = useReactFlow();
@@ -489,9 +566,12 @@ export function VideoGenNode({ data, id }: NodeProps) {
     durationS: d.durationS ?? 5,
     resolution: d.resolution ?? '720p',
     audio: d.audio ?? true,
+    inputMode: d.inputMode ?? 'text',
   });
 
-  const model = VIDEO_MODELS.find((m) => m.id === (d.model ?? VIDEO_MODELS[0].id)) ?? VIDEO_MODELS[0];
+  const selectedModelId = d.topviewModel ?? (d.model?.startsWith('topview/seedance-') ? d.model : TOPVIEW_SEEDANCE_MODELS[0].id);
+  const modelSpec = TOPVIEW_SEEDANCE_MODELS.find((m) => m.id === selectedModelId) ?? TOPVIEW_SEEDANCE_MODELS[0];
+  const model = VIDEO_MODELS.find((m) => m.id === selectedModelId) ?? TOPVIEW_VIDEO_SELECTOR;
   d.priceUsd = model.pricePerS * settings.durationS;
 
   return (
@@ -511,9 +591,27 @@ export function VideoGenNode({ data, id }: NodeProps) {
         toolbarExtra={settingsOpen && (
           <VideoSettingsPanel
             value={settings}
+            modelSpec={modelSpec}
+            modelId={selectedModelId}
+            modelOptions={TOPVIEW_SEEDANCE_MODELS}
+            onModelChange={(nextModel) => {
+              const nextSpec = TOPVIEW_SEEDANCE_MODELS.find((entry) => entry.id === nextModel) ?? TOPVIEW_SEEDANCE_MODELS[0];
+              const nextSettings = {
+                ...settings,
+                ratio: (nextSpec.defaultAspectRatio ?? '16:9') as AspectRatio,
+                durationS: nextSpec.defaultDuration ?? 5,
+                resolution: (nextSpec.defaultResolution ?? '720p') as '480p' | '720p' | '1080p' | '2160p',
+                inputMode: d.referenceUrl
+                  ? nextSpec.inputModes?.includes('singleImage') && !nextSpec.inputModes.includes('startEndFrame') ? 'singleImage' as const : 'firstLast' as const
+                  : 'text' as const,
+              };
+              setSettings(nextSettings);
+              updateNodeData(id, { model: nextModel, topviewModel: nextModel, ratio: nextSettings.ratio, durationS: nextSettings.durationS, resolution: nextSettings.resolution });
+            }}
+            hasImageReference={!!d.referenceUrl}
             onChange={(next) => {
               setSettings(next);
-              updateNodeData(id, { mode: next.mode, ratio: next.ratio, durationS: next.durationS, resolution: next.resolution, audio: next.audio });
+              updateNodeData(id, { mode: next.mode, ratio: next.ratio, durationS: next.durationS, resolution: next.resolution, audio: next.audio, inputMode: next.inputMode });
             }}
           />
         )}
@@ -523,9 +621,11 @@ export function VideoGenNode({ data, id }: NodeProps) {
           src={d.resultUrl}
           poster={d.posterUrl as string | undefined}
           status={d.status}
-          progress={d.progress ?? 0}
+          progress={d.progress ?? null}
           errorMessage={d.errorMessage as string | undefined}
           elapsedS={d.elapsedS as number | undefined}
+          etaSeconds={d.etaSeconds as number | null | undefined}
+          progressSource={d.progressSource as string | undefined}
         />
       </NodeFrame>
       <AddSideButton id={id} side="left" />
@@ -1124,8 +1224,8 @@ export const NODE_CATALOG: NodeCatalogEntry[] = [
     defaultData: { model: TEXT_MODELS[0].id, prompt: '', priceUsd: 0 } },
   { type: 'imagegen', label: 'Image', description: 'Photoreal, stylized, anime', category: 'generate', icon: ImageIcon,
     defaultData: { model: IMAGE_MODELS[0].id, prompt: '', priceUsd: IMAGE_MODELS[0].price } },
-  { type: 'videogen', label: 'Video', description: '5–30s clips, multi-model', category: 'generate', icon: Film,
-    defaultData: { model: VIDEO_MODELS[0].id, prompt: '', priceUsd: VIDEO_MODELS[0].pricePerS * 5, durationS: 5, audio: true } },
+  { type: 'videogen', label: 'Video', description: '5–30s clips, Seedance via TopView', category: 'generate', icon: Film,
+    defaultData: { model: TOPVIEW_VIDEO_SELECTOR.id, topviewModel: TOPVIEW_VIDEO_MODELS[0].id, prompt: '', priceUsd: 0, durationS: 5, audio: true, inputMode: 'text' } },
   { type: 'musicgen', label: 'Music', description: '~3min tracks with optional lyrics', category: 'generate', icon: Music,
     defaultData: { model: MUSIC_MODELS[0].id, prompt: '', priceUsd: MUSIC_MODELS[0].price, lyricsMode: 'adaptive', lyrics: '' } },
   // Utility

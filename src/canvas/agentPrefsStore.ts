@@ -6,7 +6,9 @@
 
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import { IMAGE_MODELS, VIDEO_MODELS } from './nodes';
+import { VIDEO_MODELS, TOPVIEW_VIDEO_MODELS } from './nodes';
+
+const DEFAULT_IMAGE_MODEL = 'codex/gpt-image-2';
 
 export type AgentMode = 'manual' | 'auto';
 
@@ -23,12 +25,18 @@ export const useAgentPrefs = create<AgentPrefsState>()(
   persist(
     (set) => ({
       mode: 'manual',
-      imageModel: IMAGE_MODELS[0].id,
-      videoModel: VIDEO_MODELS[1].id, // Seedance 1.5 Pro — solid mid default
+      imageModel: DEFAULT_IMAGE_MODEL,
+      videoModel: TOPVIEW_VIDEO_MODELS[0]?.id ?? VIDEO_MODELS[0].id,
       setMode: (mode) => set({ mode }),
       setImageModel: (imageModel) => set({ imageModel }),
       setVideoModel: (videoModel) => set({ videoModel }),
     }),
-    { name: 'franklin-canvas:agent-prefs' },
+    {
+      name: 'franklin-canvas:agent-prefs',
+      version: 1,
+      // Move existing installs to the new Codex default once. Later user
+      // choices remain persisted normally.
+      migrate: (persisted) => ({ ...(persisted as object), imageModel: DEFAULT_IMAGE_MODEL }) as AgentPrefsState,
+    },
   ),
 );

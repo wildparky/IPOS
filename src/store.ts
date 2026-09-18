@@ -1,3 +1,4 @@
+import { randomUUID } from './uuid';
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type { Message } from './types';
@@ -28,7 +29,7 @@ export const useChatStore = create<ChatState>()(
       activeId: null,
 
       newSession: () => {
-        const id = crypto.randomUUID();
+        const id = randomUUID();
         const now = Date.now();
         set((s) => ({
           sessions: {

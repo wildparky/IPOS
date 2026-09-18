@@ -1,3 +1,4 @@
+import { randomUUID } from '../uuid';
 // Media Agent — a right-side chat window backed by a REAL tool-calling loop.
 //
 // Unlike the old one-shot planner, the agent now decides its actions one at a
@@ -15,13 +16,20 @@ import {
 } from 'lucide-react';
 import AgentMascot from '../components/AgentMascot';
 import ModelDropdown from '../components/ModelDropdown';
-import { agentChat, summarizeTurns, type ChatTurn, type ToolCall } from '../api/franklin';
-import { TEXT_MODELS } from './nodes';
+import { agentChat, getProviderStatus, summarizeTurns, type ChatTurn, type ToolCall } from '../api/franklin';
 import { useAgentPrefs, type AgentMode } from './agentPrefsStore';
 import { useAgentSessions, type TraceItem, type TraceStatus } from './agentSessionsStore';
 import { executeToolCall, toolLabel, estimateToolCost, CONFIRM_TOOLS, type CanvasAgentApi } from './agentTools';
 
-const DEFAULT_AGENT_MODEL = TEXT_MODELS.find((m) => m.id === 'anthropic/claude-sonnet-4.6')?.id ?? TEXT_MODELS[0].id;
+const DEFAULT_AGENT_MODEL = 'gpt-5.6-luna';
+interface CodexModel { id: string; label: string; defaultEffort?: string; efforts?: string[] }
+const FALLBACK_CODEX_MODELS: CodexModel[] = [
+  { id: 'gpt-5.6-sol', label: 'Codex · GPT-5.6-Sol', defaultEffort: 'medium', efforts: ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'] },
+  { id: 'gpt-5.6-terra', label: 'Codex · GPT-5.6-Terra', defaultEffort: 'medium', efforts: ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'] },
+  { id: 'gpt-5.6-luna', label: 'Codex · GPT-5.6-Luna', defaultEffort: 'medium', efforts: ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'] },
+  { id: 'gpt-6-astra', label: 'Codex · GPT-6-Astra', defaultEffort: 'medium', efforts: ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'] },
+  { id: 'gpt-5.5', label: 'Codex · GPT-5.5', defaultEffort: 'xhigh', efforts: ['low', 'medium', 'high', 'xhigh'] },
+];
 const MAX_TURNS = 24;
 
 interface Props {
@@ -55,6 +63,26 @@ export default function AgentPanel({ open, onClose, api }: Props) {
   const [optsOpen, setOptsOpen] = useState(false);
   const [input, setInput] = useState('');
   const [model, setModel] = useState<string>(DEFAULT_AGENT_MODEL);
+  const [codexModels, setCodexModels] = useState<CodexModel[]>(FALLBACK_CODEX_MODELS);
+  const selectedCodexModel = codexModels.find((item) => item.id === model) ?? codexModels[0];
+  const [reasoningEffort, setReasoningEffort] = useState(selectedCodexModel.defaultEffort || 'medium');
+
+  useEffect(() => {
+    let cancelled = false;
+    getProviderStatus().then((status) => {
+      if (cancelled || !status?.codex.models?.length) return;
+      setCodexModels(status.codex.models);
+      if (!status.codex.models.some((item) => item.id === model)) setModel(status.codex.models[0].id);
+    });
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
+    const allowed = selectedCodexModel.efforts || [];
+    if (!allowed.includes(reasoningEffort)) setReasoningEffort(selectedCodexModel.defaultEffort || allowed[0] || 'medium');
+  }, [model, codexModels]);
+
+  const effortOptions = (selectedCodexModel.efforts?.length ? selectedCodexModel.efforts : ['low', 'medium', 'high']).map((id) => ({ id, label: `Effort · ${id.toUpperCase()}` }));
 
   const [trace, setTrace] = useState<TraceItem[]>([]);
   const [running, setRunning] = useState(false);
@@ -76,7 +104,7 @@ export default function AgentPanel({ open, onClose, api }: Props) {
   const sessions = useAgentSessions((s) => s.sessions);
   const upsertSession = useAgentSessions((s) => s.upsert);
   const removeSession = useAgentSessions((s) => s.remove);
-  const sessionId = useRef<string>(crypto.randomUUID());
+  const sessionId = useRef<string>(randomUUID());
   const [historyOpen, setHistoryOpen] = useState(false);
   const [expanded, setExpanded] = useState<Record<number, boolean>>({});
 
@@ -107,7 +135,7 @@ export default function AgentPanel({ open, onClose, api }: Props) {
   const patch = (id: number, p: Partial<TraceItem>) => setTrace((t) => t.map((x) => (x.id === id ? { ...x, ...p } : x)));
 
   const newChat = () => {
-    sessionId.current = crypto.randomUUID();
+    sessionId.current = randomUUID();
     turnsRef.current = [];
     tid.current = 0;
     stopRef.current = false;
@@ -184,7 +212,7 @@ export default function AgentPanel({ open, onClose, api }: Props) {
       for (let turn = 0; turn < MAX_TURNS; turn++) {
         if (stopRef.current) break;
         await compactIfNeeded();
-        const res = await agentChat(model, turnsRef.current, { image: imageModel, video: videoModel });
+        const res = await agentChat(model, turnsRef.current, { image: imageModel, video: videoModel }, reasoningEffort);
         if (!res.ok) { push({ kind: 'agent', text: `Sorry — ${res.error}` }); break; }
         const msg = res.message;
         turnsRef.current.push({ role: 'assistant', content: msg.content ?? '', tool_calls: msg.tool_calls });
@@ -363,9 +391,11 @@ export default function AgentPanel({ open, onClose, api }: Props) {
                       {mode === opt.id && <Check size={15} aria-hidden />}
                     </button>
                   ))}
-                  <div className="agent-opts-label">Agent model</div>
-                  {/* Agent needs tool calling — hide models that can't do it. */}
-                  <ModelDropdown models={TEXT_MODELS.filter((m) => m.tools !== false).map((m) => ({ id: m.id, label: m.label }))} value={model} onChange={setModel} />
+                  <div className="agent-opts-label">Codex OAuth model</div>
+                  <div className="agent-model-pickers">
+                    <ModelDropdown models={codexModels} value={model} onChange={setModel} />
+                    <ModelDropdown className="agent-effort-dropdown" models={effortOptions} value={reasoningEffort} onChange={setReasoningEffort} placement="right" />
+                  </div>
                 </div>
               </>
             )}

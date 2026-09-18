@@ -1,185 +1,160 @@
-// Project store — each "project" is a named canvas (its nodes + edges),
-// persisted to localStorage. Replaces the previous single-canvas persistence
-// (the old `franklin-canvas:nodes`/`:edges` keys), which is migrated into a
-// first project on load so nobody loses their existing work.
-//
-// Kept dependency-free and synchronous: the canvas reads the current project
-// on mount and writes it back (debounced) on change; the Projects view lists,
-// creates, renames and deletes. Cross-view coordination is just localStorage
-// plus a `current project id` pointer.
-
+import { randomUUID } from './uuid';
 import type { Node, Edge } from '@xyflow/react';
-
-export interface Project {
-  id: string;
-  name: string;
-  nodes: Node[];
-  edges: Edge[];
-  createdAt: number;
-  updatedAt: number;
+export interface ProjectSummary {
+    id: string;
+    name: string;
+    createdAt: number;
+    updatedAt: number;
+    revision: number;
+    nodeCount: number;
+    edgeCount: number;
+    counts: {
+        image: number;
+        video: number;
+        music: number;
+    };
+    coverUrl?: string;
 }
-
-const LIST_KEY = 'franklin-canvas:projects';
+export interface Project extends ProjectSummary {
+    nodes: Node[];
+    edges: Edge[];
+}
 const CURRENT_KEY = 'franklin-canvas:current-project';
-// Legacy single-canvas keys, migrated on first load.
-const LEGACY_NODES = 'franklin-canvas:nodes';
-const LEGACY_EDGES = 'franklin-canvas:edges';
-
-function uid(): string {
-  return `p_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
-}
-
-function readList(): Project[] {
-  try {
-    const raw = localStorage.getItem(LIST_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch { return []; }
-}
-
-function writeList(list: Project[]): void {
-  try { localStorage.setItem(LIST_KEY, JSON.stringify(list)); } catch { /* ignore quota */ }
-}
-
-// ── On-disk mirror ──
-// localStorage stays the fast synchronous source for the running app; every
-// change is ALSO mirrored to a JSON file via the backend so projects survive a
-// cache clear, are portable, and can be inspected/edited outside the browser.
-// Fire-and-forget — the app never blocks on it and works offline (localStorage).
-function mirrorSave(p: Project): void {
-  try {
-    fetch('/api/projects/save', {
-      method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ project: p }),
-    }).catch(() => {});
-  } catch { /* ignore */ }
-}
-function mirrorDelete(id: string): void {
-  try {
-    fetch('/api/projects/delete', {
-      method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ id }),
-    }).catch(() => {});
-  } catch { /* ignore */ }
-}
-
-// Hydrate localStorage from the on-disk files at startup. Files win when newer
-// (so an external edit or a post-cache-clear recovery shows up); local-only
-// projects are kept and pushed to disk (first run seeds the files). Call once
-// before the canvas mounts; safe to fail (offline → localStorage only).
-export async function hydrateFromFiles(): Promise<void> {
-  try {
-    const r = await fetch('/api/projects');
-    if (!r.ok) return;
-    const data = await r.json().catch(() => ({}));
-    const fileProjects: Project[] = Array.isArray(data.projects) ? data.projects : [];
-    const local = readList();
-    if (fileProjects.length === 0) { local.forEach(mirrorSave); return; } // seed disk from localStorage
-    const byId = new Map<string, Project>(local.map((p) => [p.id, p]));
-    for (const fp of fileProjects) {
-      if (!fp || !fp.id) continue;
-      const lp = byId.get(fp.id);
-      if (!lp || (fp.updatedAt || 0) >= (lp.updatedAt || 0)) byId.set(fp.id, fp);
+let summaries: ProjectSummary[] = [];
+const full = new Map<string, Project>();
+let ready = false;
+let queue: Promise<void> = Promise.resolve();
+const revisions = new Map<string, number>();
+const blocked = new Set<string>();
+let pending = 0;
+export const PROJECTS_CHANGED = 'franklin-projects-changed';
+export const PROJECT_MEDIA_CHANGED = 'franklin-project-media-changed';
+const mediaUrls = new Map<string, string>();
+export function canonicalMedia<T>(v: T): T { if (typeof v === 'string')
+    return (mediaUrls.get(v) ?? v) as T; if (Array.isArray(v))
+    return v.map(canonicalMedia) as T; if (v && typeof v === 'object')
+    return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, canonicalMedia(x)])) as T; return v; }
+function remember(a: unknown, b: unknown) { if (typeof a === 'string' && typeof b === 'string' && a !== b && b.startsWith('/api/project-media/'))
+    mediaUrls.set(a, b);
+else if (a && b && typeof a === 'object' && typeof b === 'object')
+    for (const [k, v] of Object.entries(a))
+        remember(v, (b as Record<string, unknown>)[k]); }
+function notify() { window.dispatchEvent(new Event(PROJECTS_CHANGED)); }
+async function request(url: string, body?: unknown) { const r = await fetch(url, { ...(body !== undefined ? { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) } : {}), cache: 'no-store', signal: AbortSignal.timeout(15000) }); const d = await r.json(); if (!r.ok || d.ok === false)
+    throw new Error(r.status === 409 ? '다른 브라우저에서 변경하거나 삭제했습니다. 복구본을 내보낸 뒤 새로고침하세요.' : d.error || 'Project server error'); return d; }
+function put(p: Project) { const x = canonicalMedia(p); full.set(x.id, x); return x; }
+async function ensureFull(id: string) { const cached = full.get(id); if (cached)
+    return cached; const d = await request('/api/projects/' + encodeURIComponent(id)); if (!d.project)
+    throw new Error('Project not found'); revisions.set(id, d.project.revision ?? 0); return put(d.project as Project); }
+function enqueue(p: Project, remove = false) { if (blocked.has(p.id))
+    return; const snap = JSON.parse(JSON.stringify(p)) as Project; pending++; queue = queue.then(async () => { try {
+    if (blocked.has(p.id))
+        return;
+    const baseRevision = revisions.get(p.id) ?? null;
+    const d = await request(remove ? '/api/projects/delete' : '/api/projects/save', remove ? { id: p.id, baseRevision } : { project: canonicalMedia(snap), baseRevision });
+    if (remove) {
+        summaries = summaries.filter(x => x.id !== p.id);
+        full.delete(p.id);
+        revisions.delete(p.id);
     }
-    // Push any local-only projects (not yet on disk) to disk.
-    const fileIds = new Set(fileProjects.map((p) => p && p.id));
-    local.forEach((p) => { if (!fileIds.has(p.id)) mirrorSave(p); });
-    writeList([...byId.values()]);
-  } catch { /* offline / backend down → localStorage only */ }
+    else {
+        const revision = d.project?.revision ?? d.revision;
+        if (typeof revision !== 'number')
+            throw new Error('백엔드를 새 버전으로 재시작하세요.');
+        revisions.set(p.id, revision);
+        if (d.project) {
+            remember(snap, d.project);
+            const latest = full.get(p.id);
+            if (latest)
+                put({ ...canonicalMedia(latest), revision });
+            window.dispatchEvent(new Event(PROJECT_MEDIA_CHANGED));
+        }
+    }
+    notify();
 }
-
-// One-time migration: if the old single-canvas keys exist and no projects do,
-// fold them into a starter project so a returning user keeps their canvas.
-function migrateLegacy(): Project[] {
-  const list = readList();
-  if (list.length > 0) return list;
-  let nodes: Node[] = [];
-  let edges: Edge[] = [];
-  try {
-    const n = localStorage.getItem(LEGACY_NODES);
-    const e = localStorage.getItem(LEGACY_EDGES);
-    if (n) nodes = JSON.parse(n);
-    if (e) edges = JSON.parse(e);
-  } catch { /* ignore */ }
-  if (nodes.length === 0 && edges.length === 0) return [];
-  const now = Date.now();
-  const p: Project = { id: uid(), name: 'My first project', nodes, edges, createdAt: now, updatedAt: now };
-  writeList([p]);
-  localStorage.setItem(CURRENT_KEY, p.id);
-  try { localStorage.removeItem(LEGACY_NODES); localStorage.removeItem(LEGACY_EDGES); } catch { /* ignore */ }
-  return [p];
+catch (e) {
+    blocked.add(p.id);
+    try {
+        localStorage.setItem('franklin-recovery:' + p.id, JSON.stringify(full.get(p.id) ?? snap));
+    }
+    catch { }
+    alert('프로젝트 저장 실패: ' + (e as Error).message + '\\nProjects의 복구본 내보내기로 작업을 보관할 수 있습니다.');
 }
-
-export function listProjects(): Project[] {
-  const list = migrateLegacy();
-  return [...list].sort((a, b) => b.updatedAt - a.updatedAt);
+finally {
+    pending--;
+} }); }
+export async function hydrateFromFiles() { await queue; const d = await request('/api/projects?summary=1'); if (d.storageVersion !== 2)
+    throw new Error('백엔드를 새 버전으로 재시작한 뒤 다시 시도하세요.'); if (!Array.isArray(d.projects))
+    throw new Error('Invalid project response'); if (pending)
+    return; summaries = [...d.projects.filter((p: ProjectSummary) => !blocked.has(p.id)), ...summaries.filter(p => blocked.has(p.id))]; for (const p of d.projects as ProjectSummary[])
+    if (!full.has(p.id) && !blocked.has(p.id))
+        revisions.set(p.id, p.revision ?? 0); ready = true; notify(); }
+export async function loadProject(id: string) {
+    await queue;
+    if (blocked.has(id))
+        return ensureFull(id);
+    const data = await request('/api/projects/' + encodeURIComponent(id));
+    if (pending)
+        return ensureFull(id);
+    revisions.set(id, data.project.revision ?? 0);
+    return put(data.project);
 }
-
-export function getCurrentId(): string | null {
-  return localStorage.getItem(CURRENT_KEY);
+export async function loadCurrentProject() {
+    const selected = getCurrentId();
+    const id = summaries.some(p => p.id === selected) ? selected : listProjects()[0]?.id;
+    if (!id) {
+        try {
+            localStorage.removeItem(CURRENT_KEY);
+        }
+        catch { }
+        return null;
+    }
+    setCurrentId(id);
+    return loadProject(id);
 }
-
-export function setCurrentId(id: string): void {
-  try { localStorage.setItem(CURRENT_KEY, id); } catch { /* ignore */ }
+export function listProjects() { return [...summaries].sort((a, b) => b.updatedAt - a.updatedAt); }
+export function getCurrentId() { try {
+    return localStorage.getItem(CURRENT_KEY);
 }
-
-export function getProject(id: string): Project | null {
-  return readList().find((p) => p.id === id) ?? null;
+catch {
+    return null;
+} }
+export function setCurrentId(id: string) { try {
+    localStorage.setItem(CURRENT_KEY, id);
 }
-
-/** Resolve the current project, creating an empty one if none exists yet. */
-export function getOrCreateCurrent(seed?: { nodes: Node[]; edges: Edge[] }): Project {
-  migrateLegacy();
-  const id = getCurrentId();
-  if (id) {
-    const p = getProject(id);
-    if (p) return p;
-  }
-  const list = readList();
-  if (list.length > 0) {
-    const newest = [...list].sort((a, b) => b.updatedAt - a.updatedAt)[0];
-    setCurrentId(newest.id);
-    return newest;
-  }
-  return createProject('Untitled project', seed);
-}
-
-export function createProject(name = 'Untitled project', seed?: { nodes: Node[]; edges: Edge[] }): Project {
-  const now = Date.now();
-  const p: Project = {
-    id: uid(),
-    name,
-    nodes: seed?.nodes ?? [],
-    edges: seed?.edges ?? [],
-    createdAt: now,
-    updatedAt: now,
-  };
-  writeList([p, ...readList()]);
-  setCurrentId(p.id);
-  mirrorSave(p);
-  return p;
-}
-
-export function renameProject(id: string, name: string): void {
-  let updated: Project | undefined;
-  writeList(readList().map((p) => (p.id === id ? (updated = { ...p, name, updatedAt: Date.now() }) : p)));
-  if (updated) mirrorSave(updated);
-}
-
-export function deleteProject(id: string): void {
-  const next = readList().filter((p) => p.id !== id);
-  writeList(next);
-  mirrorDelete(id);
-  if (getCurrentId() === id) {
-    if (next.length > 0) setCurrentId([...next].sort((a, b) => b.updatedAt - a.updatedAt)[0].id);
-    else localStorage.removeItem(CURRENT_KEY);
-  }
-}
-
-/** Persist canvas content into a project. Called debounced by the canvas. */
-export function saveProjectCanvas(id: string, nodes: Node[], edges: Edge[]): void {
-  let updated: Project | undefined;
-  writeList(readList().map((p) => (p.id === id ? (updated = { ...p, nodes, edges, updatedAt: Date.now() }) : p)));
-  if (updated) mirrorSave(updated);
-}
+catch { } }
+export function getProject(id: string) { return full.get(id) || null; }
+export function getOrCreateCurrent(seed?: {
+    nodes: Node[];
+    edges: Edge[];
+}): Project { if (!ready)
+    throw new Error('Project server is not ready'); const id = getCurrentId() || listProjects()[0]?.id; const p = id ? full.get(id) : undefined; if (p)
+    return p; if (id)
+    throw new Error('Selected project is still loading'); return createProject('Untitled project', seed); }
+export function createProject(name = 'Untitled project', seed?: {
+    nodes: Node[];
+    edges: Edge[];
+}): Project { const now = Date.now(); const p = { id: 'p_' + randomUUID().replaceAll('-', ''), name, nodes: seed?.nodes ?? [], edges: seed?.edges ?? [], createdAt: now, updatedAt: now, revision: 0, nodeCount: seed?.nodes.length ?? 0, edgeCount: seed?.edges.length ?? 0, counts: { image: 0, video: 0, music: 0 } }; summaries = [p, ...summaries]; put(p); setCurrentId(p.id); enqueue(p); notify(); return p; }
+export async function renameProject(id: string, name: string) { const p = await ensureFull(id); const n = { ...p, name, updatedAt: Date.now() }; put(n); summaries = summaries.map(x => x.id === id ? { ...x, name: n.name, updatedAt: n.updatedAt } : x); enqueue(n); notify(); }
+export async function deleteProject(id: string) { enqueue(await ensureFull(id), true); }
+export function saveProjectCanvas(id: string, nodes: Node[], edges: Edge[]) { const p = full.get(id); if (!p || (JSON.stringify(p.nodes) === JSON.stringify(nodes) && JSON.stringify(p.edges) === JSON.stringify(edges)))
+    return; const n = { ...p, nodes, edges, nodeCount: nodes.length, edgeCount: edges.length, updatedAt: Date.now() }; put(n); summaries = summaries.map(x => x.id === id ? { ...x, updatedAt: n.updatedAt, nodeCount: nodes.length, edgeCount: edges.length } : x); enqueue(n); }
+export function exportProjectRecovery() { const b = new Blob([JSON.stringify([...full.values()])], { type: 'application/json' }); const u = URL.createObjectURL(b), a = document.createElement('a'); a.href = u; a.download = 'franklin-recovery-' + Date.now() + '.json'; a.click(); URL.revokeObjectURL(u); }
+export function importLegacyProjects() { const saved = JSON.parse(localStorage.getItem('franklin-canvas:projects') || '[]') as Project[]; if (!Array.isArray(saved))
+    throw new Error('Invalid legacy projects'); for (let i = 0; i < localStorage.length; i++) {
+    const key = localStorage.key(i);
+    if (key?.startsWith('franklin-recovery:'))
+        saved.push(JSON.parse(localStorage.getItem(key)!));
+} if (!saved.length) {
+    const nodes = JSON.parse(localStorage.getItem('franklin-canvas:nodes') || '[]'), edges = JSON.parse(localStorage.getItem('franklin-canvas:edges') || '[]');
+    if (nodes.length || edges.length)
+        createProject('Legacy canvas (복구본)', { nodes, edges });
+    else
+        alert('이 브라우저에 기존 프로젝트가 없습니다.');
+} for (const p of saved)
+    if (Array.isArray(p.nodes) && Array.isArray(p.edges))
+        createProject(p.name + ' (복구본)', p); }
+window.addEventListener('beforeunload', e => { if (pending || blocked.size) {
+    e.preventDefault();
+    e.returnValue = '';
+} });
