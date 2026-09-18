@@ -26,6 +26,23 @@ An infinite canvas for **image, video and music**, with side-by-side **model com
 in-canvas editing, a 848-case prompt library, timeline, and three themes. Generations use BlockRun account credits or pay per call from a local Solana/Base wallet
 (built on the [Franklin core](https://github.com/BlockRunAI/Franklin) SDK).
 
+## Fork documentation (Codex / TopView / server storage)
+
+This fork adds Codex OAuth delegation, TopView MCP video generation and backend-authoritative
+project/media storage. The upstream BlockRun functionality described below remains available;
+its credentials and billing are separate from the new provider paths.
+
+- [Architecture and current limitations](docs/architecture.md)
+- [Installation, OAuth and local execution](docs/setup.md)
+- [Image/video generation and reference modes](docs/media-generation.md)
+- [Project storage, conflicts and recovery](docs/storage.md)
+- [LAN / Tailscale HTTPS and security](docs/remote-access.md)
+- [Troubleshooting and verification scope](docs/troubleshooting.md)
+- [Change history](CHANGELOG.md)
+
+This is not a realtime collaborative editor or an authenticated multi-user service.
+Do not expose its agent/file/command endpoints directly to the public internet.
+
 ## Demos
 
 <table>
